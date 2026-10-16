@@ -1,0 +1,43 @@
+{
+  "title": "Подать тикет в 2pz",
+  "fields": [
+    {
+      "id": "hours",
+      "label": "Сколько у вас часов?",
+      "placeholder": "ваше количество часов",
+      "style": "short",
+      "required": true,
+      "maxLength": 100
+    },
+    {
+      "id": "age",
+      "label": "Сколько вам лет?",
+      "placeholder": "Ваш возраст",
+      "style": "short",
+      "required": true,
+      "maxLength": 3
+    },
+    {
+      "id": "daily_online",
+      "label": "Ваш суточный средний онлайн?",
+      "placeholder": "Ваш онлайн в день",
+      "style": "short",
+      "required": true,
+      "maxLength": 100
+    },
+    {
+      "id": "goal",
+      "label": "Цель посещения клана?",
+      "style": "paragraph",
+      "required": true,
+      "maxLength": 500
+    },
+    {
+      "id": "about",
+      "label": "Расскажите о себе. (статы вашего пк и тд)",
+      "style": "paragraph",
+      "required": true,
+      "maxLength": 1000
+    }
+  ]
+}

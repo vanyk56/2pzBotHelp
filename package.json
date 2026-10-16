@@ -1,0 +1,19 @@
+{
+  "name": "2pz-ticket-bot",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Discord-бот заявок в клан с ИИ-ассистентом; тикеты хранятся в Neon (Postgres)",
+  "type": "module",
+  "main": "src/index.js",
+  "engines": {
+    "node": ">=22.9"
+  },
+  "scripts": {
+    "start": "node --env-file-if-exists=.env src/index.js",
+    "test": "node --env-file-if-exists=.env --test"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "pg": "^8.13.1"
+  }
+}
