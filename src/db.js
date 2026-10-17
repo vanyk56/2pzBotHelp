@@ -43,6 +43,9 @@ CREATE TABLE IF NOT EXISTS events (
   created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Сообщение сбора, которое бот обновляет (текст «через N часов»)
+ALTER TABLE events ADD COLUMN IF NOT EXISTS message_id TEXT;
+
 CREATE TABLE IF NOT EXISTS event_rsvps (
   event_id    BIGINT      NOT NULL REFERENCES events (id) ON DELETE CASCADE,
   user_id     TEXT        NOT NULL,
@@ -143,6 +146,20 @@ export function createDb(connectionString) {
 
     async eventRsvps(eventId) {
       const { rows } = await pool.query('SELECT user_id, status FROM event_rsvps WHERE event_id = $1', [eventId]);
+      return rows;
+    },
+
+    async setEventMessage(eventId, messageId) {
+      await pool.query('UPDATE events SET message_id = $2 WHERE id = $1', [eventId, messageId]);
+    },
+
+    // Сборы с опубликованным сообщением, которые ещё не прошли раньше чем `sinceUnix`
+    async activeEvents(sinceUnix) {
+      const { rows } = await pool.query(
+        `SELECT * FROM events
+         WHERE message_id IS NOT NULL AND (data->>'startsUnix')::bigint >= $1`,
+        [sinceUnix],
+      );
       return rows;
     },
 

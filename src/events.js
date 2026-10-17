@@ -112,7 +112,7 @@ export function renderEvent(event, stats, { bannerName = null, gridName = null, 
 
   const embed = new EmbedBuilder()
     .setColor(0x2b2d31)
-    .setDescription(`**Начало:** <t:${data.startsUnix}:F> (<t:${data.startsUnix}:R>)`)
+    .setDescription(startLine(data.startsUnix))
     .addFields(
       {
         name: '📋 Данные для копирования',
@@ -243,7 +243,32 @@ const chunk = (items, size) => {
   return parts;
 };
 
-export function createEventBot({ db, servers }) {
+// Русская форма слова по числу: 1 час, 2 часа, 5 часов
+function plural(n, one, few, many) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
+
+// Сколько осталось до начала: «через 21 час», «через 3 дня», «через 40 мин», «уже начался»
+export function remainingText(startsUnix, nowMs = Date.now()) {
+  const diffMinutes = Math.floor((startsUnix * 1000 - nowMs) / 60_000);
+  if (diffMinutes <= 0) return 'уже начался';
+  if (diffMinutes < 60) return `через ${diffMinutes} мин`;
+  const hours = Math.floor(diffMinutes / 60);
+  if (hours < 48) return `через ${hours} ${plural(hours, 'час', 'часа', 'часов')}`;
+  const days = Math.floor(hours / 24);
+  return `через ${days} ${plural(days, 'день', 'дня', 'дней')}`;
+}
+
+// Строка «Начало» в описании сбора: дата по часовому поясу игрока и сколько осталось
+export function startLine(startsUnix, nowMs = Date.now()) {
+  return `**Начало:** <t:${startsUnix}:F> (${remainingText(startsUnix, nowMs)})`;
+}
+
+export function createEventBot({ db, servers, client }) {
   const eventServers = new Map(servers.filter((s) => s.events).map((s) => [s.guildId, s]));
 
   const isStaff = (member, server) => {
@@ -312,7 +337,10 @@ export function createEventBot({ db, servers }) {
     const files = [];
     if (banner) files.push(new AttachmentBuilder(banner, { name: BANNER_NAME }));
     if (gridImage) files.push(new AttachmentBuilder(gridImage, { name: GRID_NAME }));
-    return interaction.editReply({ ...view, files });
+    const message = await interaction.editReply({ ...view, files });
+    // Запоминаем сообщение, чтобы обновлять в нём строку «Начало» по расписанию
+    await db.setEventMessage(event.id, message.id);
+    return message;
   }
 
   async function loadEvent(interaction, rawId) {
@@ -399,5 +427,22 @@ export function createEventBot({ db, servers }) {
     return false;
   }
 
-  return { handleInteraction };
+  // Раз в час пересчитывает строку «Начало» у сборов, которые ещё не закончились (с запасом 6 часов).
+  // Каждая правка помечается «(изменено)» в Discord, поэтому меняем только текст описания
+  async function refreshActive() {
+    const events = await db.activeEvents(Math.floor(Date.now() / 1000) - 6 * 3600);
+    for (const event of events) {
+      try {
+        const channel = await client.channels.fetch(event.channel_id);
+        const message = await channel.messages.fetch(event.message_id);
+        const text = EmbedBuilder.from(message.embeds[0]).setDescription(startLine(event.data.startsUnix));
+        await message.edit({ embeds: [text, ...message.embeds.slice(1)] });
+      } catch (error) {
+        console.warn(`Не удалось обновить сбор ${event.id}:`, error.message);
+      }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+  }
+
+  return { handleInteraction, refreshActive };
 }

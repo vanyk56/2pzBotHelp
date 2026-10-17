@@ -1,7 +1,27 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderBanner, renderGrid } from '../src/banner.js';
-import { EVENT_COMMAND, moscowWeekday, parseMoscowStart, renderEvent, renderLists } from '../src/events.js';
+import {
+  EVENT_COMMAND,
+  moscowWeekday,
+  parseMoscowStart,
+  remainingText,
+  renderEvent,
+  renderLists,
+} from '../src/events.js';
+
+test('оставшееся время склоняется по-русски и считается от текущего момента', () => {
+  const now = Date.UTC(2026, 9, 17, 17, 0); // 17 октября, 17:00 UTC
+  const after = (hours) => Math.floor(now / 1000) + hours * 3600;
+  assert.equal(remainingText(after(21), now), 'через 21 час');
+  assert.equal(remainingText(after(2), now), 'через 2 часа');
+  assert.equal(remainingText(after(5), now), 'через 5 часов');
+  assert.equal(remainingText(after(11), now), 'через 11 часов');
+  assert.equal(remainingText(after(22), now), 'через 22 часа');
+  assert.equal(remainingText(after(72), now), 'через 3 дня');
+  assert.equal(remainingText(after(-1), now), 'уже начался');
+  assert.equal(remainingText(Math.floor(now / 1000) + 40 * 60, now), 'через 40 мин');
+});
 import { EVENT_EMOJI } from '../src/events-emoji.js';
 
 test('дата и время по МСК переводятся в UTC (МСК = UTC+3)', () => {
@@ -78,7 +98,7 @@ test('квадрат карты выводится миниатюрой, кас�
 test('без баннера embed с названием, строкой начала и блоком подключения, без пароля', () => {
   const embed = renderEvent(event, { going: 0, late: 0, no: 0, pending: null }).embeds[0].toJSON();
   assert.equal(embed.title, 'Я');
-  assert.match(embed.description, /\*\*Начало:\*\* <t:1765530000:F> \(<t:1765530000:R>\)/);
+  assert.match(embed.description, /\*\*Начало:\*\* <t:1765530000:F> \(\S+ /);
   const fields = Object.fromEntries(embed.fields.map((f) => [f.name, f.value]));
   assert.match(fields['📋 Данные для копирования'], /\*\*Сервер:\*\* Я/);
   assert.match(fields['📋 Данные для копирования'], /12\.12\.2026 12:00 МСК/);

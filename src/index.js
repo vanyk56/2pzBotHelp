@@ -23,7 +23,9 @@ const bot = createTicketBot({
   servers: config.discord.servers,
   contextMessages: config.ai.contextMessages,
 });
-const events = createEventBot({ db, servers: config.discord.servers });
+const events = createEventBot({ db, servers: config.discord.servers, client });
+const HOUR_MS = 60 * 60 * 1000;
+let refreshTimer = null;
 
 client.once(Events.ClientReady, async (readyClient) => {
   await db.init();
@@ -41,6 +43,11 @@ client.once(Events.ClientReady, async (readyClient) => {
       console.error(`Не удалось зарегистрировать команды на сервере «${server.name}»:`, error.message);
     }
   }
+
+  // Строка «через N часов» в сборах обновляется раз в час
+  const refresh = () => events.refreshActive().catch((error) => console.error('Ошибка обновления сборов:', error));
+  refresh();
+  refreshTimer = setInterval(refresh, HOUR_MS);
 
   console.log(`Бот ${readyClient.user.tag} запущен`);
 });
@@ -62,6 +69,7 @@ client.on(Events.MessageCreate, (message) => {
 });
 
 async function shutdown() {
+  clearInterval(refreshTimer);
   await client.destroy();
   await db.close();
   process.exit(0);
