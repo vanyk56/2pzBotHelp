@@ -36,6 +36,19 @@ const ACTIVE_PERMS = [
   PermissionFlagsBits.ReadMessageHistory,
 ];
 
+// Плашка при закрытии тикета; note — необязательная первая строка (например, решение модератора)
+function closedEmbed(note) {
+  const lines = [
+    note,
+    'Канал и история сообщений будут удалены через 10 секунд.',
+    'Спасибо за обращение в клан 2pz! Если вопрос возникнет снова, создайте новый тикет.',
+  ];
+  return new EmbedBuilder()
+    .setColor(0xed4245)
+    .setTitle('🔒 Тикет закрыт')
+    .setDescription(lines.filter(Boolean).join('\n\n'));
+}
+
 export function createTicketBot({ client, db, ai, config, contextMessages }) {
   const { staffRoleIds } = config;
   // Ответы модели идут по одному на канал, чтобы не перемешивались
@@ -225,11 +238,14 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     );
   }
 
-  // Закрывает заявку (освобождает слот у игрока) и удаляет её канал
-  async function closeTicket(channel, decidedBy, reason) {
-    await db.setStatus(channel.id, 'closed', decidedBy);
+  // Закрывает заявку (освобождает слот у игрока), показывает плашку и удаляет канал
+  async function closeTicket(interaction, decidedBy, note) {
+    await db.setStatus(interaction.channelId, 'closed', decidedBy);
+    await interaction.reply({ embeds: [closedEmbed(note)] });
     setTimeout(() => {
-      channel.delete(reason).catch((error) => console.error('Не удалось удалить канал:', error));
+      interaction.channel
+        ?.delete('Тикет закрыт')
+        .catch((error) => console.error('Не удалось удалить канал:', error));
     }, DELETE_DELAY_MS);
   }
 
@@ -255,11 +271,7 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
         role: 'system',
         content: `Заявка отклонена (решение модератора ${interaction.user.username}), канал закрыт`,
       });
-      await interaction.reply({
-        content: '❌ Заявка **отклонена**. Канал закроется через 10 секунд.',
-        allowedMentions: { users: [ticket.user_id] },
-      });
-      return closeTicket(interaction.channel, interaction.user.id, 'Заявка отклонена');
+      return closeTicket(interaction, interaction.user.id, '❌ Заявка **отклонена**.');
     }
 
     await db.setStatus(ticket.channel_id, button.status, interaction.user.id);
@@ -280,8 +292,7 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     const ticket = await db.findTicketByChannel(interaction.channelId);
     if (!ticket) return replyEphemeral(interaction, 'Это не канал заявки.');
 
-    await interaction.reply('Тикет закрыт. Канал будет удалён через 10 секунд.');
-    return closeTicket(interaction.channel, interaction.user.id, 'Тикет закрыт');
+    return closeTicket(interaction, interaction.user.id);
   }
 
   async function handleInteraction(interaction) {
