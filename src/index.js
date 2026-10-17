@@ -3,7 +3,7 @@ import { config } from './config.js';
 import { createDb } from './db.js';
 import { createAiClient } from './ai.js';
 import { createTicketBot } from './tickets.js';
-import { createEventBot, EVENT_COMMAND } from './events.js';
+import { createEventBot, ensureEventEmojis, EVENT_COMMAND } from './events.js';
 
 const COMMANDS = [
   { name: 'panel', description: 'Опубликовать и закрепить кнопки подачи заявок в этом канале' },
@@ -33,6 +33,9 @@ client.once(Events.ClientReady, async (readyClient) => {
     try {
       const guild = await readyClient.guilds.fetch(server.guildId);
       await guild.commands.set(server.events ? [...COMMANDS, EVENT_COMMAND] : COMMANDS);
+      if (server.events) {
+        await ensureEventEmojis(guild).catch((error) => console.error('Не удалось загрузить эмодзи сбора:', error.message));
+      }
       console.log(`Команды зарегистрированы на сервере «${server.name}» (${guild.name})`);
     } catch (error) {
       console.error(`Не удалось зарегистрировать команды на сервере «${server.name}»:`, error.message);

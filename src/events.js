@@ -7,9 +7,14 @@ import {
   EmbedBuilder,
   MessageFlags,
 } from 'discord.js';
-import { renderBanner } from './banner.js';
+import { readFileSync } from 'node:fs';
+import { renderBanner, renderGrid } from './banner.js';
+import { EVENT_EMOJI } from './events-emoji.js';
 
 const BANNER_NAME = 'event.png';
+const GRID_NAME = 'grid.png';
+// Имена кастомных эмодзи для кнопок (картинки в assets/emoji), по ключам кнопок
+const BUTTON_EMOJI = { going: 'event_going', late: 'event_late', no: 'event_no', check: 'event_check' };
 const RSVP_STATUSES = ['going', 'late', 'no'];
 const MEMBER_PAGE = 1000;
 const MENTIONS_PER_MESSAGE = 30;
@@ -56,6 +61,13 @@ export const EVENT_COMMAND = {
       max_length: 200,
     },
     {
+      name: 'grid',
+      description: 'Клетка карты, где строится клан, например: G12 (необязательно)',
+      type: ApplicationCommandOptionType.String,
+      required: false,
+      max_length: 10,
+    },
+    {
       name: 'role',
       description: 'Роль, у которой проверяем ответы (необязательно)',
       type: ApplicationCommandOptionType.Role,
@@ -93,11 +105,12 @@ const codeBlock = (text) => `\`\`\`\n${text}\n\`\`\``;
 const button = (customId, label, style, emoji) =>
   new ButtonBuilder().setCustomId(customId).setLabel(label).setStyle(style).setEmoji(emoji);
 
-// Сообщение сбора: баннер (картинка с датой, временем, подключением и паролем), текстовые блоки для копирования
-// и кнопки с количеством ответов. Картинка одна на сбор, при нажатии на кнопки её не перерисовываем
-export function renderEvent(event, stats, { bannerName = null } = {}) {
+// Сообщение сбора: баннер (дата, время, подключение, пароль), квадрат с клеткой карты справа,
+// текст для копирования и четыре кнопки в одном ряду. Картинки прикреплены к сообщению один раз,
+// при нажатии на кнопки их не перерисовываем
+export function renderEvent(event, stats, { bannerName = null, gridName = null, emoji = {} } = {}) {
   const { id, data } = event;
-  const pendingLabel = stats.pending === null ? 'Проверка' : `Проверка · не ответили: ${stats.pending}`;
+  const pendingLabel = stats.pending === null ? 'Проверка' : `Не ответили · ${stats.pending}`;
 
   const embed = new EmbedBuilder()
     .setColor(0x2b2d31)
@@ -108,21 +121,39 @@ export function renderEvent(event, stats, { bannerName = null } = {}) {
         value: `**Сервер:** ${data.title}\n**Дата и время:** ${data.date} ${data.time} МСК`,
       },
       { name: 'Подключение', value: codeBlock(data.connect) },
-      { name: 'Пароль', value: codeBlock(data.password) },
     );
+  if (gridName) embed.setThumbnail(`attachment://${gridName}`);
   if (bannerName) embed.setImage(`attachment://${bannerName}`);
   else embed.setTitle(data.title);
 
-  const answers = new ActionRowBuilder().addComponents(
-    button(`event:rsvp:${id}:going`, `Буду на вайпе · ${stats.going}`, ButtonStyle.Success, '✅'),
-    button(`event:rsvp:${id}:late`, `Опаздываю · ${stats.late}`, ButtonStyle.Primary, '⏰'),
-    button(`event:rsvp:${id}:no`, `Не буду · ${stats.no}`, ButtonStyle.Danger, '❌'),
-  );
-  const check = new ActionRowBuilder().addComponents(
-    button(`event:check:${id}`, pendingLabel, ButtonStyle.Secondary, '🔎'),
+  const row = new ActionRowBuilder().addComponents(
+    button(`event:rsvp:${id}:going`, `Буду · ${stats.going}`, ButtonStyle.Success, emoji.going ?? '✅'),
+    button(`event:rsvp:${id}:late`, `Опаздываю · ${stats.late}`, ButtonStyle.Primary, emoji.late ?? '⏰'),
+    button(`event:rsvp:${id}:no`, `Не буду · ${stats.no}`, ButtonStyle.Danger, emoji.no ?? '❌'),
+    button(`event:check:${id}`, pendingLabel, ButtonStyle.Secondary, emoji.check ?? '🔎'),
   );
 
-  return { embeds: [embed], components: [answers, check] };
+  return { embeds: [embed], components: [row] };
+}
+
+// Кастомные эмодзи сервера для кнопок. Если эмодзи нет, в кнопке остаётся обычный символ
+function resolveEmoji(guild) {
+  return Object.fromEntries(
+    Object.entries(BUTTON_EMOJI).map(([key, name]) => {
+      const found = guild?.emojis?.cache?.find((e) => e.name === name);
+      return [key, found ? { id: found.id, name: found.name } : null];
+    }),
+  );
+}
+
+// Загружает эмодзи из assets/emoji на сервер, если их там ещё нет. Нужно право «Управление выражениями»
+export async function ensureEventEmojis(guild) {
+  await guild.emojis.fetch();
+  for (const name of Object.keys(EVENT_EMOJI)) {
+    if (guild.emojis.cache.some((e) => e.name === name)) continue;
+    const attachment = readFileSync(new URL(`../assets/emoji/${name}.png`, import.meta.url));
+    await guild.emojis.create({ name, attachment });
+  }
 }
 
 // Все участники сервера через REST: привилегированные intents не нужны
@@ -144,6 +175,15 @@ async function pendingMembers(guild, roleId, rsvps) {
   const responded = new Set(rsvps.map((r) => r.user_id));
   const members = await listGuildMembers(guild);
   return members.filter((m) => !m.user.bot && m.roles.cache.has(roleId) && !responded.has(m.id));
+}
+
+async function renderImage(render, what) {
+  try {
+    return await render();
+  } catch (error) {
+    console.error(`Не удалось нарисовать: ${what}`, error);
+    return null;
+  }
 }
 
 const chunk = (items, size) => {
@@ -169,7 +209,10 @@ export function createEventBot({ db, servers }) {
     for (const { status } of rsvps) counts[status] += 1;
 
     const pending = await pendingMembers(guild, event.role_id, rsvps);
-    const view = renderEvent(event, { ...counts, pending: pending?.length ?? null }, options);
+    const view = renderEvent(event, { ...counts, pending: pending?.length ?? null }, {
+      ...options,
+      emoji: resolveEmoji(guild),
+    });
     return { view, pending };
   }
 
@@ -182,6 +225,7 @@ export function createEventBot({ db, servers }) {
     const connect = interaction.options.getString('connect', true).trim();
     const password = interaction.options.getString('password', true).trim();
     const role = interaction.options.getRole('role');
+    const grid = interaction.options.getString('grid')?.trim().toUpperCase() || null;
 
     let startsAt;
     try {
@@ -206,17 +250,18 @@ export function createEventBot({ db, servers }) {
       roleId: role?.id ?? null,
     });
 
-    // Баннер не ломает сбор: если картинка не нарисовалась, публикуем embed без неё
-    let banner = null;
-    try {
-      banner = await renderBanner(data);
-    } catch (error) {
-      console.error('Не удалось нарисовать баннер сбора:', error);
-    }
+    // Картинки не ломают сбор: если что-то не нарисовалось, публикуем без неё
+    const banner = await renderImage(() => renderBanner(data), 'баннер сбора');
+    const gridImage = grid ? await renderImage(() => renderGrid(grid), 'квадрат карты') : null;
 
     await interaction.deferReply();
-    const { view } = await buildView(event, interaction.guild, { bannerName: banner ? BANNER_NAME : null });
-    const files = banner ? [new AttachmentBuilder(banner, { name: BANNER_NAME })] : [];
+    const { view } = await buildView(event, interaction.guild, {
+      bannerName: banner ? BANNER_NAME : null,
+      gridName: gridImage ? GRID_NAME : null,
+    });
+    const files = [];
+    if (banner) files.push(new AttachmentBuilder(banner, { name: BANNER_NAME }));
+    if (gridImage) files.push(new AttachmentBuilder(gridImage, { name: GRID_NAME }));
     return interaction.editReply({ ...view, files });
   }
 

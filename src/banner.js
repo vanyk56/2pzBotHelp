@@ -131,3 +131,47 @@ export async function renderBanner(data) {
   const svg = await satori(tree, { width: WIDTH, height: HEIGHT, fonts });
   return new Resvg(svg, { fitTo: { mode: 'width', value: WIDTH } }).render().asPng();
 }
+
+// Квадрат карты с координатой, например G12: зона, где строится клан. Возвращает PNG 400×400
+export async function renderGrid(coordinate) {
+  const cell = () => box({ flexGrow: 1, border: '1px solid rgba(255,255,255,0.20)' });
+  const row = () => box({ flexGrow: 1 }, [cell(), cell(), cell(), cell()]);
+  const layer = (children) =>
+    box({ position: 'absolute', top: 0, left: 0, width: 400, height: 400, flexDirection: 'column' }, children);
+
+  const tree = box(
+    { width: 400, height: 400, background: 'linear-gradient(135deg, #2a2160 0%, #100c24 100%)', fontFamily: SANS },
+    [
+      layer([row(), row(), row(), row()]),
+      box(
+        {
+          position: 'absolute',
+          top: 0,
+          left: 0,
+          width: 400,
+          height: 400,
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+        },
+        [
+          box({ fontSize: 104, fontWeight: 700, color: '#ffffff' }, [coordinate]),
+          box({ fontSize: 20, fontWeight: 700, letterSpacing: 2, color: '#8fd2ff', marginTop: 6 }, ['ЗОНА СТРОИТЕЛЬСТВА']),
+        ],
+      ),
+    ],
+  );
+
+  const svg = await satori(tree, { width: 400, height: 400, fonts });
+  return new Resvg(svg, { fitTo: { mode: 'width', value: 400 } }).render().asPng();
+}
+
+// Иконка-эмодзи для кнопок: цветной круг с символом. Возвращает PNG 128×128
+export async function renderIcon(symbol, color) {
+  const tree = box(
+    { width: 128, height: 128, borderRadius: 64, background: color, alignItems: 'center', justifyContent: 'center' },
+    [box({ fontSize: 76, fontWeight: 700, color: '#ffffff', fontFamily: SANS }, [symbol])],
+  );
+  const svg = await satori(tree, { width: 128, height: 128, fonts });
+  return new Resvg(svg, { fitTo: { mode: 'width', value: 128 } }).render().asPng();
+}
