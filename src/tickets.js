@@ -48,6 +48,11 @@ const ACTIVE_PERMS = [
   PermissionFlagsBits.ReadMessageHistory,
 ];
 
+// Обращается ли сообщение к боту: упоминание или слово «бот» / «2pzbot» отдельно
+export function addressesBot(text, botId) {
+  return text.includes(`<@${botId}>`) || /(^|[^\p{L}])(бот|2pzbot)([^\p{L}]|$)/iu.test(text);
+}
+
 // Плашка при закрытии тикета; note — необязательная первая строка (например, решение модератора)
 function closedEmbed(note) {
   const lines = [
@@ -368,8 +373,10 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
       content,
     });
 
-    // Модераторы сами общаются с игроком: ассистент не вмешивается
-    if (await db.staffActiveRecently(ticket.id, STAFF_SILENCE_MINUTES)) return;
+    // Модераторы сами общаются с игроком: ассистент не вмешивается.
+    // Сообщения, которые обращаются к боту, на тишину не влияют.
+    const staffTalk = await db.recentStaffMessages(ticket.id, STAFF_SILENCE_MINUTES);
+    if (staffTalk.some((text) => !addressesBot(text, client.user.id))) return;
 
     enqueue(message.channelId, () => respond(message.channel, { fallback: REPLY_FALLBACK, skippable: true }));
   }

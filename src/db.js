@@ -68,15 +68,15 @@ export function createDb(connectionString) {
       );
     },
 
-    // Писал ли модератор в тикет за последние `minutes` минут
-    async staffActiveRecently(ticketId, minutes) {
-      const { rowCount } = await pool.query(
-        `SELECT 1 FROM ticket_messages
+    // Тексты сообщений модераторов в тикете за последние `minutes` минут
+    async recentStaffMessages(ticketId, minutes) {
+      const { rows } = await pool.query(
+        `SELECT content FROM ticket_messages
          WHERE ticket_id = $1 AND role = 'staff' AND created_at > now() - make_interval(mins => $2)
-         LIMIT 1`,
+         ORDER BY id`,
         [ticketId, minutes],
       );
-      return rowCount > 0;
+      return rows.map((row) => row.content);
     },
 
     async addMessage(ticketId, { role, authorId = null, authorName = null, content }) {
