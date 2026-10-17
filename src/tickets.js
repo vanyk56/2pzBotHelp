@@ -16,13 +16,18 @@ const ACTION_PREFIX = 'ticket:act:';
 const GREETING_FALLBACK =
   'Спасибо за заявку! В скором времени вас вызовут на обзвон. Если есть вопросы, пишите сюда.';
 const REPLY_FALLBACK = 'Сейчас не могу ответить на ваше сообщение. Модераторы увидят его в этом канале.';
+// Модель пишет это слово, когда отвечать не нужно (small talk, не по теме)
+const SKIP = '<SKIP>';
+// Если модератор писал в тикет за это время, ассистент молчит и не встревает в разговор
+const STAFF_SILENCE_MINUTES = 15;
+const DELETE_DELAY_MS = 10_000;
 
 // Кнопки модерации под заявкой (подписи как в старом боте 2pzbot)
 const STAFF_BUTTONS = [
   { action: 'accept', label: 'Принять', style: ButtonStyle.Success, status: 'accepted' },
   { action: 'review', label: 'Взять на рассмотрение', style: ButtonStyle.Secondary, status: 'in_review' },
   { action: 'call', label: 'Вызвать на обзвон', style: ButtonStyle.Primary, status: 'call' },
-  { action: 'reject', label: 'Отклонить', style: ButtonStyle.Danger, status: 'rejected' },
+  { action: 'reject', label: 'Отклонить', style: ButtonStyle.Danger, status: 'closed' },
 ];
 
 const ACTIVE_PERMS = [
@@ -54,18 +59,24 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     return next;
   }
 
-  // Генерирует ответ модели по истории тикета и отправляет его в канал
-  async function respond(channel, extraMessages = [], fallback = null) {
+  // Генерирует ответ модели по истории тикета и отправляет его в канал.
+  // skippable: модель может промолчать через <SKIP> (для ответов игроку, не для приветствия)
+  async function respond(channel, { extra = [], fallback = null, skippable = false } = {}) {
     const ticket = await db.findTicketByChannel(channel.id);
     if (!ticket || ticket.status === 'closed') return;
 
     let reply;
     try {
       const history = await db.recentMessages(ticket.id, contextMessages);
-      reply = await ai.complete(buildMessages(ticket, [...history, ...extraMessages]));
+      reply = await ai.complete(buildMessages(ticket, [...history, ...extra]));
     } catch (error) {
       console.error(`Ошибка ИИ в канале ${channel.id}:`, error);
       if (!fallback) return;
+      reply = fallback;
+    }
+
+    if (reply.includes(SKIP)) {
+      if (skippable || !fallback) return;
       reply = fallback;
     }
 
@@ -129,8 +140,8 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
 
   // Публикует панель и снимает старые панели бота, чтобы в канале была одна кнопка
   async function publishPanel(channel) {
-    const pinned = await channel.messages.fetchPinned().catch(() => null);
-    for (const message of pinned?.values() ?? []) {
+    const pins = await channel.messages.fetchPins().catch(() => null);
+    for (const { message } of pins?.items ?? []) {
       const isOldPanel =
         message.author.id === client.user.id &&
         message.components.some((row) => row.components.some((c) => c.customId === PANEL_BUTTON_ID));
@@ -209,7 +220,17 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     await postApplication(channel, ticket);
     await interaction.editReply(`Заявка создана: <#${channel.id}>`);
 
-    enqueue(channel.id, () => respond(channel, [{ role: 'system', content: GREETING_REQUEST }], GREETING_FALLBACK));
+    enqueue(channel.id, () =>
+      respond(channel, { extra: [{ role: 'system', content: GREETING_REQUEST }], fallback: GREETING_FALLBACK }),
+    );
+  }
+
+  // Закрывает заявку (освобождает слот у игрока) и удаляет её канал
+  async function closeTicket(channel, decidedBy, reason) {
+    await db.setStatus(channel.id, 'closed', decidedBy);
+    setTimeout(() => {
+      channel.delete(reason).catch((error) => console.error('Не удалось удалить канал:', error));
+    }, DELETE_DELAY_MS);
   }
 
   function actionText(action, ticket) {
@@ -218,7 +239,6 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
       accept: `✅ <@${ticket.user_id}>, заявка **принята**. Поздравляем! Дальнейшие шаги будут в этом канале.`,
       review: '⏳ Заявка взята на **рассмотрение**. Ожидайте решения модераторов.',
       call: `📞 <@${ticket.user_id}>, вас вызвали на **обзвон**. ${voice || 'Ожидайте сообщения модератора в этом канале.'}`,
-      reject: '❌ Заявка **отклонена**.',
     };
     return texts[action];
   }
@@ -229,6 +249,18 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     const ticket = await db.findTicketByChannel(interaction.channelId);
     const button = STAFF_BUTTONS.find((b) => b.action === action);
     if (!ticket || !button) return replyEphemeral(interaction, 'Заявка не найдена.');
+
+    if (action === 'reject') {
+      await db.addMessage(ticket.id, {
+        role: 'system',
+        content: `Заявка отклонена (решение модератора ${interaction.user.username}), канал закрыт`,
+      });
+      await interaction.reply({
+        content: '❌ Заявка **отклонена**. Канал закроется через 10 секунд.',
+        allowedMentions: { users: [ticket.user_id] },
+      });
+      return closeTicket(interaction.channel, interaction.user.id, 'Заявка отклонена');
+    }
 
     await db.setStatus(ticket.channel_id, button.status, interaction.user.id);
     await db.addMessage(ticket.id, {
@@ -248,11 +280,8 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     const ticket = await db.findTicketByChannel(interaction.channelId);
     if (!ticket) return replyEphemeral(interaction, 'Это не канал заявки.');
 
-    await db.setStatus(ticket.channel_id, 'closed', interaction.user.id);
     await interaction.reply('Тикет закрыт. Канал будет удалён через 10 секунд.');
-    setTimeout(() => {
-      interaction.channel?.delete('Тикет закрыт').catch((error) => console.error('Не удалось удалить канал:', error));
-    }, 10_000);
+    return closeTicket(interaction.channel, interaction.user.id, 'Тикет закрыт');
   }
 
   async function handleInteraction(interaction) {
@@ -305,7 +334,11 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
       authorName: message.author.username,
       content,
     });
-    enqueue(message.channelId, () => respond(message.channel, [], REPLY_FALLBACK));
+
+    // Модераторы сами общаются с игроком: ассистент не вмешивается
+    if (await db.staffActiveRecently(ticket.id, STAFF_SILENCE_MINUTES)) return;
+
+    enqueue(message.channelId, () => respond(message.channel, { fallback: REPLY_FALLBACK, skippable: true }));
   }
 
   return { publishPanel, handleInteraction, handleMessage };

@@ -68,6 +68,17 @@ export function createDb(connectionString) {
       );
     },
 
+    // Писал ли модератор в тикет за последние `minutes` минут
+    async staffActiveRecently(ticketId, minutes) {
+      const { rowCount } = await pool.query(
+        `SELECT 1 FROM ticket_messages
+         WHERE ticket_id = $1 AND role = 'staff' AND created_at > now() - make_interval(mins => $2)
+         LIMIT 1`,
+        [ticketId, minutes],
+      );
+      return rowCount > 0;
+    },
+
     async addMessage(ticketId, { role, authorId = null, authorName = null, content }) {
       await pool.query(
         `INSERT INTO ticket_messages (ticket_id, role, author_id, author_name, content)
