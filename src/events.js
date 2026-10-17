@@ -14,7 +14,12 @@ import { EVENT_EMOJI } from './events-emoji.js';
 const BANNER_NAME = 'event.png';
 const GRID_NAME = 'grid.png';
 // Имена кастомных эмодзи для кнопок (картинки в assets/emoji), по ключам кнопок
-const BUTTON_EMOJI = { going: 'event_going', late: 'event_late', no: 'event_no', check: 'event_check' };
+const BUTTON_EMOJI = { going: 'ev_going', late: 'ev_late', no: 'ev_no', check: 'ev_check' };
+// Что ответить после «опаздываю» и «не буду»: ссылку на канал из servers.json (rsvpChannelId) бот добавляет сам
+const REDIRECT_TEXT = {
+  late: '⏰ Записали, что вы опаздываете. Напишите, во сколько подключитесь, в',
+  no: '❌ Записали, что вы не придёте. Если есть причина, напишите её в',
+};
 const RSVP_STATUSES = ['going', 'late', 'no'];
 const MEMBER_PAGE = 1000;
 const MENTIONS_PER_MESSAGE = 30;
@@ -309,7 +314,7 @@ export function createEventBot({ db, servers }) {
     return event;
   }
 
-  async function handleRsvp(interaction, rawId, status) {
+  async function handleRsvp(interaction, server, rawId, status) {
     if (!RSVP_STATUSES.includes(status)) return;
     const event = await loadEvent(interaction, rawId);
     if (!event) return;
@@ -319,6 +324,14 @@ export function createEventBot({ db, servers }) {
     // Меняем только кнопки: картинка и текст сбора остаются как были
     const { view } = await buildView(event, interaction.guild);
     await interaction.editReply({ components: view.components });
+
+    // Опаздывающим и тем, кто не придёт, показываем канал, куда написать причину или время (видно только им)
+    if (REDIRECT_TEXT[status] && server.rsvpChannelId) {
+      await interaction.followUp({
+        content: `${REDIRECT_TEXT[status]} <#${server.rsvpChannelId}>`,
+        flags: MessageFlags.Ephemeral,
+      });
+    }
   }
 
   // Списки для модерации: личное окно, видно только нажавшему
@@ -365,7 +378,7 @@ export function createEventBot({ db, servers }) {
       const server = eventServers.get(interaction.guildId);
       if (!server) return false;
       const [, kind, rawId, status] = interaction.customId.split(':');
-      if (kind === 'rsvp') await handleRsvp(interaction, rawId, status);
+      if (kind === 'rsvp') await handleRsvp(interaction, server, rawId, status);
       if (kind === 'check') await handleCheck(interaction, server, rawId);
       if (kind === 'remind') await handleRemind(interaction, server, rawId);
       return true;

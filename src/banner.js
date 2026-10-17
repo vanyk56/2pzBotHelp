@@ -149,11 +149,34 @@ export async function renderGrid(coordinate) {
   return new Resvg(svg, { fitTo: { mode: 'width', value: 400 } }).render().asPng();
 }
 
-// Иконка-эмодзи для кнопок: цветной круг с символом. Возвращает PNG 128×128
-export async function renderIcon(symbol, color) {
+// Иконка-эмодзи для кнопок: скруглённый квадрат с градиентом и белым символом из SVG-штрихов.
+// icon = { gradient, shapes }. Возвращает PNG 128×128
+export async function renderIcon({ gradient, shapes }) {
+  const strokes = shapes.map(({ tag, ...attrs }) => ({ type: tag, props: attrs }));
+  const glyph = {
+    type: 'svg',
+    props: {
+      width: 76,
+      height: 76,
+      viewBox: '0 0 24 24',
+      fill: 'none',
+      stroke: '#ffffff',
+      strokeWidth: 2.4,
+      strokeLinecap: 'round',
+      strokeLinejoin: 'round',
+      children: strokes,
+    },
+  };
   const tree = box(
-    { width: 128, height: 128, borderRadius: 64, background: color, alignItems: 'center', justifyContent: 'center' },
-    [box({ fontSize: 76, fontWeight: 700, color: '#ffffff', fontFamily: SANS }, [symbol])],
+    {
+      width: 128,
+      height: 128,
+      borderRadius: 36,
+      background: gradient,
+      alignItems: 'center',
+      justifyContent: 'center',
+    },
+    [glyph],
   );
   const svg = await satori(tree, { width: 128, height: 128, fonts });
   return new Resvg(svg, { fitTo: { mode: 'width', value: 128 } }).render().asPng();

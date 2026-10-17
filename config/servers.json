@@ -24,7 +24,8 @@
       "ticketCategoryId": "1561029703794556958",
       "staffRoleIds": ["1493147074005307392", "1493147514440912956", "1493170228295766210"],
       "voiceChannelId": null,
-      "events": true
+      "events": true,
+      "rsvpChannelId": "1493114515418648668"
     }
   ]
 }

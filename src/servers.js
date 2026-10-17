@@ -49,6 +49,8 @@ export function loadServers(url) {
       voiceChannelId: server.voiceChannelId ? snowflake(server.voiceChannelId, 'voiceChannelId') : null,
       // Команда /event со сборами на вайп (только там, где включено)
       events: server.events === true,
+      // Канал, куда ведут игроков, которые опаздывают или не будут (необязательно)
+      rsvpChannelId: server.rsvpChannelId ? snowflake(server.rsvpChannelId, 'rsvpChannelId') : null,
     };
   });
 }
