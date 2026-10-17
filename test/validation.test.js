@@ -7,9 +7,17 @@ const answersFrom = (values) =>
 
 const problemFields = (values) => validateAnswers(answersFrom(values)).map((p) => p.label);
 
-test('анкета из одних единиц отклоняется целиком (как в скриншоте)', () => {
+test('анкета из одних единиц отклоняется (как в скриншоте)', () => {
   const values = { hours: '1', age: '1', daily_online: '1', goal: '1', about: '1' };
-  assert.equal(problemFields(values).length, form.fields.length);
+  const fields = problemFields(values);
+  assert.ok(fields.includes('Сколько вам лет?'));
+  assert.ok(fields.includes('Цель посещения клана?'));
+  assert.ok(fields.includes('Расскажите о себе. (статы вашего пк и тд)'));
+});
+
+test('короткий средний онлайн вроде «8» не блокируется', () => {
+  assert.deepEqual(problemFields({ daily_online: '8' }).filter((l) => l.startsWith('Ваш суточный')), []);
+  assert.deepEqual(problemFields({ hours: '4' }).filter((l) => l === 'Сколько у вас часов?'), []);
 });
 
 test('нормальные ответы из реальных заявок проходят', () => {

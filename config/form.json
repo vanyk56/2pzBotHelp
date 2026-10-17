@@ -7,7 +7,6 @@
       "placeholder": "ваше количество часов",
       "style": "short",
       "required": true,
-      "minLength": 2,
       "maxLength": 100,
       "requireDigit": true
     },
@@ -26,7 +25,6 @@
       "placeholder": "Ваш онлайн в день",
       "style": "short",
       "required": true,
-      "minLength": 2,
       "maxLength": 100,
       "requireDigit": true
     },
