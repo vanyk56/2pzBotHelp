@@ -17,12 +17,12 @@
     },
     {
       "name": "Сервер 2",
-      "guildId": "REPLACE_SERVER2_GUILD_ID",
-      "panelChannelId": "REPLACE_SERVER2_PANEL_CHANNEL_ID",
+      "guildId": "1493084946749853777",
+      "panelChannelId": "1561027943977984051",
       "panelKey": "secondary",
       "types": ["caller", "media", "moderator"],
-      "ticketCategoryId": "REPLACE_SERVER2_CATEGORY_ID",
-      "staffRoleIds": ["REPLACE_SERVER2_ROLE_ID"],
+      "ticketCategoryId": "1561029703794556958",
+      "staffRoleIds": ["1493147074005307392", "1493147514440912956", "1493170228295766210"],
       "voiceChannelId": null
     }
   ]
