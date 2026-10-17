@@ -47,6 +47,7 @@ export function buildFormModal(formConfig = form) {
       .setRequired(field.required !== false)
       .setMaxLength(field.maxLength ?? 1000);
 
+    if (field.minLength) input.setMinLength(field.minLength);
     if (field.placeholder) input.setPlaceholder(field.placeholder);
     return new ActionRowBuilder().addComponents(input);
   });
@@ -61,4 +62,33 @@ export function readAnswers(modalSubmit, formConfig = form) {
     label: field.label,
     value: modalSubmit.fields.getTextInputValue(field.id).trim(),
   }));
+}
+
+// Проверяет смысл ответов: не «1», не случайный набор цифр. Возвращает [{ label, problem }]
+export function validateAnswers(answers, formConfig = form) {
+  const problems = [];
+  for (const field of formConfig.fields) {
+    const answer = answers.find((a) => a.id === field.id);
+    const problem = checkValue(field, answer?.value ?? '');
+    if (problem) problems.push({ label: field.label, problem });
+  }
+  return problems;
+}
+
+function checkValue(field, value) {
+  if (!value) return field.required === false ? null : 'поле не заполнено';
+  if (field.minLength && value.length < field.minLength) {
+    return `слишком короткий ответ, нужно минимум ${field.minLength} симв.`;
+  }
+  if (field.requireDigit && !/\d/.test(value)) return 'укажите число';
+  if (field.numberRange) {
+    const [min, max] = field.numberRange;
+    const match = value.match(/\d+/);
+    const number = match ? Number(match[0]) : NaN;
+    if (!(number >= min && number <= max)) return `укажите число от ${min} до ${max}`;
+  }
+  if (field.minWords && (value.match(/\p{L}{2,}/gu) ?? []).length < field.minWords) {
+    return `напишите подробнее, нужно минимум ${field.minWords} слова`;
+  }
+  return null;
 }

@@ -7,7 +7,9 @@
       "placeholder": "ваше количество часов",
       "style": "short",
       "required": true,
-      "maxLength": 100
+      "minLength": 2,
+      "maxLength": 100,
+      "requireDigit": true
     },
     {
       "id": "age",
@@ -15,7 +17,8 @@
       "placeholder": "Ваш возраст",
       "style": "short",
       "required": true,
-      "maxLength": 3
+      "maxLength": 3,
+      "numberRange": [10, 90]
     },
     {
       "id": "daily_online",
@@ -23,21 +26,27 @@
       "placeholder": "Ваш онлайн в день",
       "style": "short",
       "required": true,
-      "maxLength": 100
+      "minLength": 2,
+      "maxLength": 100,
+      "requireDigit": true
     },
     {
       "id": "goal",
       "label": "Цель посещения клана?",
       "style": "paragraph",
       "required": true,
-      "maxLength": 500
+      "minLength": 10,
+      "maxLength": 500,
+      "minWords": 2
     },
     {
       "id": "about",
       "label": "Расскажите о себе. (статы вашего пк и тд)",
       "style": "paragraph",
       "required": true,
-      "maxLength": 1000
+      "minLength": 20,
+      "maxLength": 1000,
+      "minWords": 3
     }
   ]
 }

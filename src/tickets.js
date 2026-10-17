@@ -7,7 +7,7 @@ import {
   MessageFlags,
   PermissionFlagsBits,
 } from 'discord.js';
-import { buildFormModal, FORM_MODAL_ID, readAnswers } from './form.js';
+import { buildFormModal, FORM_MODAL_ID, readAnswers, validateAnswers } from './form.js';
 import { buildMessages, GREETING_REQUEST, statusTitle } from './assistant.js';
 import { slugify, splitMessage } from './utils.js';
 
@@ -191,6 +191,14 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     }
 
     const answers = readAnswers(interaction);
+    const problems = validateAnswers(answers);
+    if (problems.length > 0) {
+      const lines = problems.map((p) => `• **${p.label}**: ${p.problem}`);
+      return interaction.editReply(
+        `Заявка не отправлена, анкета заполнена некорректно. Исправьте поля и подайте заново:\n${lines.join('\n')}`,
+      );
+    }
+
     const channel = await guild.channels.create({
       name: `заявление-${slugify(user.username, user.id)}`,
       type: ChannelType.GuildText,
