@@ -3,6 +3,7 @@ import { config } from './config.js';
 import { createDb } from './db.js';
 import { createAiClient } from './ai.js';
 import { createTicketBot } from './tickets.js';
+import { createEventBot, EVENT_COMMAND } from './events.js';
 
 const COMMANDS = [
   { name: 'panel', description: 'Опубликовать и закрепить кнопки подачи заявок в этом канале' },
@@ -22,6 +23,7 @@ const bot = createTicketBot({
   servers: config.discord.servers,
   contextMessages: config.ai.contextMessages,
 });
+const events = createEventBot({ db, servers: config.discord.servers });
 
 client.once(Events.ClientReady, async (readyClient) => {
   await db.init();
@@ -30,7 +32,7 @@ client.once(Events.ClientReady, async (readyClient) => {
   for (const server of config.discord.servers) {
     try {
       const guild = await readyClient.guilds.fetch(server.guildId);
-      await guild.commands.set(COMMANDS);
+      await guild.commands.set(server.events ? [...COMMANDS, EVENT_COMMAND] : COMMANDS);
       console.log(`Команды зарегистрированы на сервере «${server.name}» (${guild.name})`);
     } catch (error) {
       console.error(`Не удалось зарегистрировать команды на сервере «${server.name}»:`, error.message);
@@ -42,6 +44,7 @@ client.once(Events.ClientReady, async (readyClient) => {
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
+    if (await events.handleInteraction(interaction)) return;
     await bot.handleInteraction(interaction);
   } catch (error) {
     console.error('Ошибка взаимодействия:', error);

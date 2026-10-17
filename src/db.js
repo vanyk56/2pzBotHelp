@@ -32,6 +32,24 @@ CREATE TABLE IF NOT EXISTS ticket_messages (
 );
 
 CREATE INDEX IF NOT EXISTS ticket_messages_ticket_idx ON ticket_messages (ticket_id, id);
+
+-- Сборы на вайп: параметры и ответы игроков (буду / опаздываю / не буду)
+CREATE TABLE IF NOT EXISTS events (
+  id          BIGSERIAL PRIMARY KEY,
+  guild_id    TEXT        NOT NULL,
+  channel_id  TEXT        NOT NULL,
+  data        JSONB       NOT NULL,
+  role_id     TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS event_rsvps (
+  event_id    BIGINT      NOT NULL REFERENCES events (id) ON DELETE CASCADE,
+  user_id     TEXT        NOT NULL,
+  status      TEXT        NOT NULL,
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (event_id, user_id)
+);
 `;
 
 export function createDb(connectionString) {
@@ -99,6 +117,32 @@ export function createDb(connectionString) {
          ) AS last ORDER BY id ASC`,
         [ticketId, limit],
       );
+      return rows;
+    },
+
+    async createEvent({ guildId, channelId, data, roleId }) {
+      const { rows } = await pool.query(
+        `INSERT INTO events (guild_id, channel_id, data, role_id) VALUES ($1, $2, $3, $4) RETURNING *`,
+        [guildId, channelId, JSON.stringify(data), roleId],
+      );
+      return rows[0];
+    },
+
+    async getEvent(id) {
+      const { rows } = await pool.query('SELECT * FROM events WHERE id = $1', [id]);
+      return rows[0] ?? null;
+    },
+
+    async setRsvp(eventId, userId, status) {
+      await pool.query(
+        `INSERT INTO event_rsvps (event_id, user_id, status) VALUES ($1, $2, $3)
+         ON CONFLICT (event_id, user_id) DO UPDATE SET status = EXCLUDED.status, updated_at = now()`,
+        [eventId, userId, status],
+      );
+    },
+
+    async eventRsvps(eventId) {
+      const { rows } = await pool.query('SELECT user_id, status FROM event_rsvps WHERE event_id = $1', [eventId]);
       return rows;
     },
 

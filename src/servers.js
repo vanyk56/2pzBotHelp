@@ -47,6 +47,8 @@ export function loadServers(url) {
       ticketCategoryId: snowflake(server.ticketCategoryId, 'ticketCategoryId'),
       staffRoleIds,
       voiceChannelId: server.voiceChannelId ? snowflake(server.voiceChannelId, 'voiceChannelId') : null,
+      // Команда /event со сборами на вайп (только там, где включено)
+      events: server.events === true,
     };
   });
 }
