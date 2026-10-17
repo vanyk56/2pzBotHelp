@@ -13,7 +13,9 @@
     "test": "node --env-file-if-exists=.env --test"
   },
   "dependencies": {
+    "@resvg/resvg-js": "^2.6.2",
     "discord.js": "^14.16.3",
-    "pg": "^8.13.1"
+    "pg": "^8.13.1",
+    "satori": "^0.62.0"
   }
 }

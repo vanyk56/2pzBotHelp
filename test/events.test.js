@@ -1,5 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { renderBanner } from '../src/banner.js';
 import { moscowWeekday, parseMoscowStart, renderEvent } from '../src/events.js';
 
 test('дата и время по МСК переводятся в UTC (МСК = UTC+3)', () => {
@@ -31,30 +32,44 @@ const event = {
   },
 };
 
-test('сообщение сбора: блок данных, четыре кнопки с количеством ответов', () => {
-  const json = renderEvent(event, { going: 1, late: 0, no: 0, pending: 3 }).components[0].toJSON();
-  const labels = json.components.map((b) => b.label);
+const rowsOf = (message) => message.components.map((row) => row.toJSON());
 
-  assert.deepEqual(labels, [
-    'Буду на вайпе · 1',
-    'Опаздываю · 0',
-    'Не буду · 0',
-    'Проверка · не ответили: 3',
-  ]);
-  assert.equal(json.components[0].custom_id, 'event:rsvp:7:going');
-  assert.equal(json.components[3].custom_id, 'event:check:7');
+test('кнопки: три ответа в первом ряду, проверка во втором, с количеством', () => {
+  const rows = rowsOf(renderEvent(event, { going: 1, late: 0, no: 0, pending: 3 }));
+
+  assert.deepEqual(
+    rows[0].components.map((b) => b.label),
+    ['Буду на вайпе · 1', 'Опаздываю · 0', 'Не буду · 0'],
+  );
+  assert.deepEqual(rows[1].components.map((b) => b.label), ['Проверка · не ответили: 3']);
+  assert.equal(rows[0].components[0].custom_id, 'event:rsvp:7:going');
+  assert.equal(rows[1].components[0].custom_id, 'event:check:7');
 });
 
 test('без роли кнопка проверки без счётчика', () => {
-  const json = renderEvent(event, { going: 0, late: 0, no: 0, pending: null }).components[0].toJSON();
-  assert.equal(json.components[3].label, 'Проверка');
+  const rows = rowsOf(renderEvent(event, { going: 0, late: 0, no: 0, pending: null }));
+  assert.equal(rows[1].components[0].label, 'Проверка');
 });
 
-test('embed содержит название, дату, время и блоки подключения и пароля', () => {
+test('с баннером embed без заголовка, картинка подключается по имени файла', () => {
+  const embed = renderEvent(event, { going: 0, late: 0, no: 0, pending: null }, { bannerName: 'event.png' })
+    .embeds[0]
+    .toJSON();
+  assert.equal(embed.title, undefined);
+  assert.equal(embed.image.url, 'attachment://event.png');
+});
+
+test('без баннера embed с названием и датой, блоки подключения и пароля для копирования', () => {
   const embed = renderEvent(event, { going: 0, late: 0, no: 0, pending: null }).embeds[0].toJSON();
   assert.equal(embed.title, 'Я');
   const fields = Object.fromEntries(embed.fields.map((f) => [f.name, f.value]));
   assert.match(fields['Подключение'], /connect 12\.324\.2412\.532:67/);
   assert.match(fields['Пароль'], /3041/);
   assert.match(fields['Старт у вас'], /<t:1765530000:F>/);
+});
+
+test('баннер рендерится в PNG', async () => {
+  const png = await renderBanner({ ...event.data, startsUnix: event.data.startsUnix });
+  assert.equal(png.subarray(0, 4).toString('hex'), '89504e47');
+  assert.ok(png.length > 10_000);
 });

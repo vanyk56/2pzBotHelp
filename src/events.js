@@ -1,12 +1,15 @@
 import {
   ActionRowBuilder,
   ApplicationCommandOptionType,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   EmbedBuilder,
   MessageFlags,
 } from 'discord.js';
+import { renderBanner } from './banner.js';
 
+const BANNER_NAME = 'event.png';
 const RSVP_STATUSES = ['going', 'late', 'no'];
 const MEMBER_PAGE = 1000;
 const MENTIONS_PER_MESSAGE = 30;
@@ -90,31 +93,32 @@ const codeBlock = (text) => `\`\`\`\n${text}\n\`\`\``;
 const button = (customId, label, style, emoji) =>
   new ButtonBuilder().setCustomId(customId).setLabel(label).setStyle(style).setEmoji(emoji);
 
-// Сообщение сбора: блок с датой, временем, подключением и паролем, под ним кнопки с количеством ответов
-export function renderEvent(event, stats) {
+// Сообщение сбора: баннер (картинка с датой, временем, подключением и паролем), текстовые блоки для копирования
+// и кнопки с количеством ответов. Картинка одна на сбор, при нажатии на кнопки её не перерисовываем
+export function renderEvent(event, stats, { bannerName = null } = {}) {
   const { id, data } = event;
   const pendingLabel = stats.pending === null ? 'Проверка' : `Проверка · не ответили: ${stats.pending}`;
 
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
-    .setTitle(data.title)
-    .setDescription('**ВАЙП** · время указано по МСК')
     .addFields(
-      { name: 'Дата вайпа', value: `${data.date}\n${data.weekday}`, inline: true },
-      { name: 'Начало (МСК)', value: `**${data.time}**`, inline: true },
       { name: 'Старт у вас', value: `<t:${data.startsUnix}:F> · <t:${data.startsUnix}:R>` },
       { name: 'Подключение', value: codeBlock(data.connect) },
       { name: 'Пароль', value: codeBlock(data.password), inline: true },
     );
+  if (bannerName) embed.setImage(`attachment://${bannerName}`);
+  else embed.setTitle(data.title).setDescription(`**ВАЙП** · время указано по МСК · ${data.date} ${data.time} (МСК)`);
 
-  const row = new ActionRowBuilder().addComponents(
+  const answers = new ActionRowBuilder().addComponents(
     button(`event:rsvp:${id}:going`, `Буду на вайпе · ${stats.going}`, ButtonStyle.Success, '✅'),
     button(`event:rsvp:${id}:late`, `Опаздываю · ${stats.late}`, ButtonStyle.Primary, '⏰'),
     button(`event:rsvp:${id}:no`, `Не буду · ${stats.no}`, ButtonStyle.Danger, '❌'),
+  );
+  const check = new ActionRowBuilder().addComponents(
     button(`event:check:${id}`, pendingLabel, ButtonStyle.Secondary, '🔎'),
   );
 
-  return { embeds: [embed], components: [row] };
+  return { embeds: [embed], components: [answers, check] };
 }
 
 // Все участники сервера через REST: привилегированные intents не нужны
@@ -155,13 +159,13 @@ export function createEventBot({ db, servers }) {
   const replyEphemeral = (interaction, content) =>
     interaction.reply({ content, flags: MessageFlags.Ephemeral });
 
-  async function buildView(event, guild) {
+  async function buildView(event, guild, options) {
     const rsvps = await db.eventRsvps(event.id);
     const counts = { going: 0, late: 0, no: 0 };
     for (const { status } of rsvps) counts[status] += 1;
 
     const pending = await pendingMembers(guild, event.role_id, rsvps);
-    const view = renderEvent(event, { ...counts, pending: pending?.length ?? null });
+    const view = renderEvent(event, { ...counts, pending: pending?.length ?? null }, options);
     return { view, pending };
   }
 
@@ -198,9 +202,18 @@ export function createEventBot({ db, servers }) {
       roleId: role?.id ?? null,
     });
 
+    // Баннер не ломает сбор: если картинка не нарисовалась, публикуем embed без неё
+    let banner = null;
+    try {
+      banner = await renderBanner(data);
+    } catch (error) {
+      console.error('Не удалось нарисовать баннер сбора:', error);
+    }
+
     await interaction.deferReply();
-    const { view } = await buildView(event, interaction.guild);
-    return interaction.editReply(view);
+    const { view } = await buildView(event, interaction.guild, { bannerName: banner ? BANNER_NAME : null });
+    const files = banner ? [new AttachmentBuilder(banner, { name: BANNER_NAME })] : [];
+    return interaction.editReply({ ...view, files });
   }
 
   async function loadEvent(interaction, rawId) {
@@ -219,8 +232,9 @@ export function createEventBot({ db, servers }) {
 
     await interaction.deferUpdate();
     await db.setRsvp(event.id, interaction.user.id, status);
+    // Меняем только кнопки: картинка и текст сбора остаются как были
     const { view } = await buildView(event, interaction.guild);
-    await interaction.editReply(view);
+    await interaction.editReply({ components: view.components });
   }
 
   async function handleCheck(interaction, server, rawId) {
