@@ -30,6 +30,18 @@ const STAFF_BUTTONS = [
   { action: 'reject', label: 'Отклонить', style: ButtonStyle.Danger, status: 'closed' },
 ];
 
+// Решения, которые закрывают тикет. note — текст в плашке «Тикет закрыт»
+const CLOSING_DECISIONS = {
+  accept: {
+    verdict: 'принята',
+    note: (userId) => `✅ <@${userId}>, заявка **принята**. Поздравляем!`,
+  },
+  reject: {
+    verdict: 'отклонена',
+    note: () => '❌ Заявка **отклонена**.',
+  },
+};
+
 const ACTIVE_PERMS = [
   PermissionFlagsBits.ViewChannel,
   PermissionFlagsBits.SendMessages,
@@ -274,12 +286,14 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     const button = STAFF_BUTTONS.find((b) => b.action === action);
     if (!ticket || !button) return replyEphemeral(interaction, 'Заявка не найдена.');
 
-    if (action === 'reject') {
+    // Решения, после которых тикет закрывается: плашка и удаление канала
+    const closing = CLOSING_DECISIONS[action];
+    if (closing) {
       await db.addMessage(ticket.id, {
         role: 'system',
-        content: `Заявка отклонена (решение модератора ${interaction.user.username}), канал закрыт`,
+        content: `Заявка ${closing.verdict} (решение модератора ${interaction.user.username}), канал закрыт`,
       });
-      return closeTicket(interaction, interaction.user.id, '❌ Заявка **отклонена**.');
+      return closeTicket(interaction, interaction.user.id, closing.note(ticket.user_id));
     }
 
     await db.setStatus(ticket.channel_id, button.status, interaction.user.id);
