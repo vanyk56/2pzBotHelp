@@ -3,10 +3,10 @@ import satori from 'satori';
 import { Resvg } from '@resvg/resvg-js';
 
 const WIDTH = 1000;
-const HEIGHT = 640;
+const HEIGHT = 542;
 // satori считает padding сверх width: внутренний блок 912 + 2 × 44 = 1000
 const INNER_WIDTH = 912;
-const INNER_HEIGHT = 552;
+const INNER_HEIGHT = 454;
 const PAD = 44;
 // Ширина карточки внутри внутреннего блока: 912 = 2 × (card + 52) + 20
 const CARD = 394;
@@ -16,7 +16,6 @@ const SANS = 'DejaVu Sans';
 const MONO = 'DejaVu Sans Mono';
 
 const ACCENT = 'linear-gradient(90deg, #7c6cff 0%, #3ba3ff 100%)';
-const WARM = 'linear-gradient(90deg, #ffbe5c 0%, #ff9a3d 100%)';
 // Тёмный фон как в образце: мягкое фиолетовое свечение справа вверху и синее слева внизу
 const BACKGROUND = [
   'radial-gradient(circle at 88% 10%, rgba(124, 108, 255, 0.42) 0%, rgba(124, 108, 255, 0) 42%)',
@@ -67,7 +66,7 @@ function dateLongMoscow(startsUnix) {
     .replace(/\s*г\.?$/, '');
 }
 
-// Баннер сбора: название, дата, время, подключение и пароль. Возвращает PNG
+// Баннер сбора: название, дата, время и подключение. Возвращает PNG
 export async function renderBanner(data) {
   const tree = box(
     {
@@ -107,22 +106,6 @@ export async function renderBanner(data) {
             label('ПОДКЛЮЧЕНИЕ'),
             box({ fontFamily: MONO, fontSize: 32, fontWeight: 700, marginTop: 6 }, [data.connect]),
           ]),
-          box(
-            {
-              width: FULL,
-              justifyContent: 'space-between',
-              alignItems: 'center',
-              marginTop: 18,
-              padding: '18px 26px',
-              borderRadius: 18,
-              background: WARM,
-              color: '#1d1305',
-            },
-            [
-              box({ fontSize: 20, fontWeight: 700, letterSpacing: 2 }, ['ПАРОЛЬ']),
-              box({ fontFamily: MONO, fontSize: 46, fontWeight: 700, letterSpacing: 10 }, [data.password]),
-            ],
-          ),
         ],
       ),
     ],

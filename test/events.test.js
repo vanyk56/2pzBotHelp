@@ -34,7 +34,6 @@ const event = {
     time: '12:00',
     weekday: 'суббота',
     connect: 'connect 12.324.2412.532:67',
-    password: '3041',
     startsUnix: 1765530000,
   },
 };

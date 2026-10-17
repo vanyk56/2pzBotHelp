@@ -54,13 +54,6 @@ export const EVENT_COMMAND = {
       max_length: 200,
     },
     {
-      name: 'password',
-      description: 'Пароль сервера',
-      type: ApplicationCommandOptionType.String,
-      required: true,
-      max_length: 200,
-    },
-    {
       name: 'grid',
       description: 'Клетка карты, где строится клан, например: G12 (необязательно)',
       type: ApplicationCommandOptionType.String,
@@ -223,7 +216,6 @@ export function createEventBot({ db, servers }) {
     const date = interaction.options.getString('date', true).trim();
     const time = interaction.options.getString('time', true).trim();
     const connect = interaction.options.getString('connect', true).trim();
-    const password = interaction.options.getString('password', true).trim();
     const role = interaction.options.getRole('role');
     const grid = interaction.options.getString('grid')?.trim().toUpperCase() || null;
 
@@ -240,7 +232,6 @@ export function createEventBot({ db, servers }) {
       time,
       weekday: moscowWeekday(startsAt),
       connect,
-      password,
       startsUnix: Math.floor(startsAt.getTime() / 1000),
     };
     const event = await db.createEvent({
