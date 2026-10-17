@@ -7,14 +7,22 @@ import {
   MessageFlags,
   PermissionFlagsBits,
 } from 'discord.js';
-import { buildFormModal, FORM_MODAL_ID, readAnswers, validateAnswers } from './form.js';
-import { buildMessages, GREETING_REQUEST, statusTitle } from './assistant.js';
+import {
+  buildFormModal,
+  findType,
+  FORM_MODAL_PREFIX,
+  readAnswers,
+  ticketConfig,
+  validateAnswers,
+} from './form.js';
+import { buildMessages, greetingRequest, statusTitle } from './assistant.js';
 import { slugify, splitMessage } from './utils.js';
 
-export const PANEL_BUTTON_ID = 'ticket:open';
+// Кнопка открытия формы: ticket:open:<id типа>. Старый ticket:open означает клан (панели в канале до перехода)
+const OPEN_PREFIX = 'ticket:open:';
+const LEGACY_OPEN_ID = 'ticket:open';
 const ACTION_PREFIX = 'ticket:act:';
-const GREETING_FALLBACK =
-  'Спасибо за заявку! В скором времени вас вызовут на обзвон. Если есть вопросы, пишите сюда.';
+const GREETING_FALLBACK = 'Спасибо за заявку! Модераторы скоро её рассмотрят, ответ появится в этом канале.';
 const REPLY_FALLBACK = 'Сейчас не могу ответить на ваше сообщение. Модераторы увидят его в этом канале.';
 // Модель пишет это слово, когда отвечать не нужно (small talk, не по теме)
 const SKIP = '<SKIP>';
@@ -127,7 +135,7 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     );
   }
 
-  async function postApplication(channel, ticket) {
+  async function postApplication(channel, ticket, type) {
     const embed = new EmbedBuilder()
       .setTitle('Заявление')
       .setColor(0x5865f2)
@@ -135,6 +143,7 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
         ticket.answers.map((answer) => ({ name: answer.label, value: answer.value || '—', inline: false })),
       )
       .addFields(
+        { name: 'Тип заявки', value: type.name, inline: true },
         { name: 'Пользователь', value: `<@${ticket.user_id}>`, inline: true },
         { name: 'Username', value: ticket.username, inline: true },
         { name: 'ID', value: ticket.user_id, inline: true },
@@ -150,55 +159,63 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     await message.pin().catch((error) => console.warn('Не удалось закрепить заявку:', error.message));
   }
 
-  function panelPayload() {
-    const embed = new EmbedBuilder()
-      .setColor(0x5865f2)
-      .setTitle('Подать заявку в 2pz')
-      .setDescription(
-        'Нажмите кнопку ниже и заполните анкету. Для заявки откроется приватный канал: там ответит ассистент, а модераторы напишут решение.\n\n' +
-          '> Эта форма будет получена приложением 2pzbot. Не указывайте свои пароли и прочую конфиденциальную информацию.',
-      );
-    const row = new ActionRowBuilder().addComponents(
-      new ButtonBuilder()
-        .setCustomId(PANEL_BUTTON_ID)
-        .setLabel('Подать тикет')
-        .setEmoji('🎫')
-        .setStyle(ButtonStyle.Primary),
-    );
-    return { embeds: [embed], components: [row] };
+  // Панель одного канала: описание и кнопка на каждый тип, привязанный к этой панели
+  function panelPayload(panelKey) {
+    const panel = ticketConfig.panels[panelKey];
+    const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(panel.title).setDescription(panel.description);
+
+    const buttons = ticketConfig.types
+      .filter((type) => type.panel === panelKey)
+      .map((type) => {
+        const button = new ButtonBuilder()
+          .setCustomId(`${OPEN_PREFIX}${type.id}`)
+          .setLabel(type.button)
+          .setStyle(ButtonStyle.Primary);
+        if (type.emoji) button.setEmoji(type.emoji);
+        return button;
+      });
+
+    return { embeds: [embed], components: [new ActionRowBuilder().addComponents(buttons)] };
   }
 
-  // Публикует панель и снимает старые панели бота, чтобы в канале была одна кнопка
-  async function publishPanel(channel) {
+  // Публикует панель и снимает старые панели бота, чтобы в канале оставалась одна актуальная
+  async function publishPanel(channel, panelKey) {
     const pins = await channel.messages.fetchPins().catch(() => null);
     for (const { message } of pins?.items ?? []) {
       const isOldPanel =
         message.author.id === client.user.id &&
-        message.components.some((row) => row.components.some((c) => c.customId === PANEL_BUTTON_ID));
+        message.components.some((row) =>
+          row.components.some((c) => c.customId?.startsWith(OPEN_PREFIX) || c.customId === LEGACY_OPEN_ID),
+        );
       if (isOldPanel) await message.delete().catch(() => {});
     }
 
-    const panel = await channel.send(panelPayload());
+    const panel = await channel.send(panelPayload(panelKey));
     await panel.pin();
   }
 
   async function panelCommand(interaction) {
     if (!isStaff(interaction.member)) return replyEphemeral(interaction, 'Команда только для модерации.');
 
-    const channel = await client.channels.fetch(config.panelChannelId);
-    await publishPanel(channel);
-    return replyEphemeral(interaction, `Панель опубликована в <#${channel.id}>.`);
+    const published = [];
+    for (const [panelKey, channelId] of Object.entries(config.panelChannels)) {
+      if (!channelId) continue;
+      const channel = await client.channels.fetch(channelId);
+      await publishPanel(channel, panelKey);
+      published.push(`<#${channel.id}>`);
+    }
+    return replyEphemeral(interaction, `Панели опубликованы: ${published.join(', ')}.`);
   }
 
-  async function openFormModal(interaction) {
+  async function openFormModal(interaction, type) {
     const active = await db.findActiveTicketByUser(interaction.user.id);
     if (active) {
       return replyEphemeral(interaction, `У вас уже есть открытая заявка: <#${active.channel_id}>`);
     }
-    return interaction.showModal(buildFormModal());
+    return interaction.showModal(buildFormModal(type));
   }
 
-  async function submitForm(interaction) {
+  async function submitForm(interaction, type) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const { guild, user } = interaction;
@@ -207,8 +224,8 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
       return interaction.editReply(`У вас уже есть открытая заявка: <#${active.channel_id}>`);
     }
 
-    const answers = readAnswers(interaction);
-    const problems = validateAnswers(answers);
+    const answers = readAnswers(interaction, type);
+    const problems = validateAnswers(answers, type);
     if (problems.length > 0) {
       const lines = problems.map((p) => `• **${p.label}**: ${p.problem}`);
       return interaction.editReply(
@@ -217,10 +234,10 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     }
 
     const channel = await guild.channels.create({
-      name: `заявление-${slugify(user.username, user.id)}`,
+      name: `${type.channelPrefix}-${slugify(user.username, user.id)}`,
       type: ChannelType.GuildText,
       parent: config.ticketCategoryId,
-      topic: `Заявка ${user.id}`,
+      topic: `${type.name} · ${user.id}`,
       permissionOverwrites: [
         { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
         { id: user.id, allow: ACTIVE_PERMS },
@@ -247,6 +264,7 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
         channelId: channel.id,
         userId: user.id,
         username: user.username,
+        type: type.id,
         answers,
       });
     } catch (error) {
@@ -255,11 +273,11 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
       throw error;
     }
 
-    await postApplication(channel, ticket);
+    await postApplication(channel, ticket, type);
     await interaction.editReply(`Заявка создана: <#${channel.id}>`);
 
     enqueue(channel.id, () =>
-      respond(channel, { extra: [{ role: 'system', content: GREETING_REQUEST }], fallback: GREETING_FALLBACK }),
+      respond(channel, { extra: [{ role: 'system', content: greetingRequest(type) }], fallback: GREETING_FALLBACK }),
     );
   }
 
@@ -330,15 +348,21 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     }
 
     if (interaction.isButton()) {
-      if (interaction.customId === PANEL_BUTTON_ID) return openFormModal(interaction);
-      if (interaction.customId.startsWith(ACTION_PREFIX)) {
-        return staffAction(interaction, interaction.customId.slice(ACTION_PREFIX.length));
+      const id = interaction.customId;
+      if (id === LEGACY_OPEN_ID) return openFormModal(interaction, findType('clan'));
+      if (id.startsWith(OPEN_PREFIX)) {
+        const type = findType(id.slice(OPEN_PREFIX.length));
+        return type ? openFormModal(interaction, type) : null;
+      }
+      if (id.startsWith(ACTION_PREFIX)) {
+        return staffAction(interaction, id.slice(ACTION_PREFIX.length));
       }
       return null;
     }
 
-    if (interaction.isModalSubmit() && interaction.customId === FORM_MODAL_ID) {
-      return submitForm(interaction);
+    if (interaction.isModalSubmit() && interaction.customId.startsWith(FORM_MODAL_PREFIX)) {
+      const type = findType(interaction.customId.slice(FORM_MODAL_PREFIX.length));
+      return type ? submitForm(interaction, type) : null;
     }
     return null;
   }

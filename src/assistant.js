@@ -1,11 +1,11 @@
 import { readFileSync } from 'node:fs';
+import { findType } from './form.js';
 
 const systemPrompt = readFileSync(new URL('../config/system-prompt.md', import.meta.url), 'utf8').trim();
 
-export const GREETING_REQUEST =
-  'Заявка только что создана. Напиши короткое приветствие (3–4 предложения): поблагодари за анкету, ' +
-  'скажи, что в скором времени игрока вызовут на обзвон, и предложи задать вопросы, если они есть. ' +
-  'Не обещай принятие.';
+export const greetingRequest = (type) =>
+  `Заявка только что создана (тип: ${type.name}). Напиши короткое приветствие (3–4 предложения): поблагодари за анкету, ` +
+  `скажи, что ${type.nextStep}, и предложи задать вопросы, если они есть. Не обещай принятие.`;
 
 const STATUS_TITLES = {
   open: 'заявка получена, ждёт рассмотрения',
@@ -20,7 +20,9 @@ export const statusTitle = (status) => STATUS_TITLES[status] ?? status;
 
 function describeApplication(ticket) {
   const answers = ticket.answers.map((answer) => `- ${answer.label} ${answer.value || '—'}`).join('\n');
+  const typeName = findType(ticket.ticket_type)?.name ?? ticket.ticket_type;
   return [
+    `Тип заявки: ${typeName}`,
     `Игрок: ${ticket.username}`,
     `Статус заявки: ${statusTitle(ticket.status)}`,
     'Анкета:',

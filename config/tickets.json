@@ -1,0 +1,188 @@
+{
+  "panels": {
+    "main": {
+      "title": "Подать заявку в 2pz",
+      "description": "Нажмите кнопку ниже и заполните анкету. Для заявки откроется приватный канал: там ответит ассистент, а модераторы напишут решение.\n\n> Эта форма будет получена приложением 2pzbot. Не указывайте свои пароли и прочую конфиденциальную информацию."
+    },
+    "secondary": {
+      "title": "Другие тикеты",
+      "description": "Выберите тип тикета и заполните анкету. Для заявки откроется приватный канал, где ответит ассистент и модераторы.\n\n> Эта форма будет получена приложением 2pzbot. Не указывайте свои пароли и прочую конфиденциальную информацию."
+    }
+  },
+  "types": [
+    {
+      "id": "clan",
+      "panel": "main",
+      "name": "Заявка в клан 2pz",
+      "button": "Подать тикет",
+      "emoji": "🎫",
+      "channelPrefix": "заявление",
+      "title": "Подать тикет в 2pz",
+      "nextStep": "в скором времени вас вызовут на обзвон",
+      "fields": [
+        {
+          "id": "hours",
+          "label": "Сколько у вас часов?",
+          "placeholder": "ваше количество часов",
+          "style": "short",
+          "required": true,
+          "maxLength": 100,
+          "requireDigit": true
+        },
+        {
+          "id": "age",
+          "label": "Сколько вам лет?",
+          "placeholder": "Ваш возраст",
+          "style": "short",
+          "required": true,
+          "maxLength": 3,
+          "numberRange": [10, 90]
+        },
+        {
+          "id": "daily_online",
+          "label": "Ваш суточный средний онлайн?",
+          "placeholder": "Ваш онлайн в день",
+          "style": "short",
+          "required": true,
+          "maxLength": 100,
+          "requireDigit": true
+        },
+        {
+          "id": "goal",
+          "label": "Цель посещения клана?",
+          "style": "paragraph",
+          "required": true,
+          "minLength": 10,
+          "maxLength": 500,
+          "minWords": 2
+        },
+        {
+          "id": "about",
+          "label": "Расскажите о себе. (статы вашего пк и тд)",
+          "style": "paragraph",
+          "required": true,
+          "minLength": 20,
+          "maxLength": 1000,
+          "minWords": 3
+        }
+      ]
+    },
+    {
+      "id": "caller",
+      "panel": "secondary",
+      "name": "Коллер (16+)",
+      "button": "Коллер 16+",
+      "emoji": "📞",
+      "channelPrefix": "коллер",
+      "title": "Заявка на коллера",
+      "nextStep": "модераторы рассмотрят заявку и ответят в этом канале",
+      "fields": [
+        {
+          "id": "age",
+          "label": "Сколько вам лет?",
+          "placeholder": "16 и больше",
+          "style": "short",
+          "required": true,
+          "maxLength": 3,
+          "numberRange": [16, 90]
+        },
+        {
+          "id": "hours",
+          "label": "Сколько у вас часов?",
+          "placeholder": "ваше количество часов",
+          "style": "short",
+          "required": true,
+          "maxLength": 100,
+          "requireDigit": true
+        }
+      ]
+    },
+    {
+      "id": "media",
+      "panel": "secondary",
+      "name": "Медиа клана",
+      "button": "Медиа клана",
+      "emoji": "🎬",
+      "channelPrefix": "медиа",
+      "title": "Заявка: медиа клана",
+      "nextStep": "модераторы посмотрят ваши каналы и ответят в этом канале",
+      "fields": [
+        {
+          "id": "channel",
+          "label": "Ссылка на ваш канал",
+          "placeholder": "YouTube, Twitch, TikTok и т.д.",
+          "style": "short",
+          "required": true,
+          "maxLength": 300,
+          "requireLink": true
+        },
+        {
+          "id": "extra_link",
+          "label": "Вторая ссылка (необязательно)",
+          "placeholder": "другой канал или профиль",
+          "style": "short",
+          "required": false,
+          "maxLength": 300,
+          "requireLink": true
+        },
+        {
+          "id": "content",
+          "label": "Чем занимаетесь в контенте?",
+          "style": "paragraph",
+          "required": true,
+          "minLength": 10,
+          "maxLength": 500,
+          "minWords": 2
+        }
+      ]
+    },
+    {
+      "id": "moderator",
+      "panel": "secondary",
+      "name": "Модератор",
+      "button": "Модератор",
+      "emoji": "🛡️",
+      "channelPrefix": "модератор",
+      "title": "Заявка на модератора",
+      "nextStep": "модераторы рассмотрят заявку и ответят в этом канале",
+      "fields": [
+        {
+          "id": "age",
+          "label": "Сколько вам лет?",
+          "placeholder": "16 и больше",
+          "style": "short",
+          "required": true,
+          "maxLength": 3,
+          "numberRange": [16, 90]
+        },
+        {
+          "id": "hours",
+          "label": "Сколько у вас часов?",
+          "placeholder": "ваше количество часов",
+          "style": "short",
+          "required": true,
+          "maxLength": 100,
+          "requireDigit": true
+        },
+        {
+          "id": "mod_experience",
+          "label": "Опыт модерации (где и сколько)",
+          "style": "paragraph",
+          "required": true,
+          "minLength": 10,
+          "maxLength": 500,
+          "minWords": 2
+        },
+        {
+          "id": "why",
+          "label": "Почему хотите стать модератором?",
+          "style": "paragraph",
+          "required": true,
+          "minLength": 20,
+          "maxLength": 1000,
+          "minWords": 3
+        }
+      ]
+    }
+  ]
+}

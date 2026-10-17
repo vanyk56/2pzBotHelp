@@ -4,44 +4,64 @@ import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { buildFormModal, form, FORM_MODAL_ID, loadForm } from '../src/form.js';
+import { buildFormModal, FORM_MODAL_PREFIX, loadTicketConfig, ticketTypes } from '../src/form.js';
 
-const writeForm = (data) => {
-  const path = join(mkdtempSync(join(tmpdir(), 'form-')), 'form.json');
-  writeFileSync(path, JSON.stringify(data));
+const panels = { main: { title: 'Тест', description: 'Тест' } };
+
+const writeConfig = (types) => {
+  const path = join(mkdtempSync(join(tmpdir(), 'tickets-')), 'tickets.json');
+  writeFileSync(path, JSON.stringify({ panels, types }));
   return pathToFileURL(path);
 };
 
-test('анкета из config/form.json собирается в модалку Discord', () => {
-  const json = buildFormModal(form).toJSON();
+const typeWith = (fields, overrides = {}) => ({
+  id: 'test',
+  panel: 'main',
+  name: 'Тест',
+  button: 'Тест',
+  channelPrefix: 'тест',
+  title: 'Тест',
+  nextStep: 'тест',
+  fields,
+  ...overrides,
+});
 
-  assert.equal(json.custom_id, FORM_MODAL_ID);
-  assert.equal(json.components.length, form.fields.length);
-  assert.deepEqual(
-    json.components.map((row) => row.components[0].custom_id),
-    form.fields.map((field) => field.id),
-  );
+const field = (id, label = `Вопрос ${id}`) => ({ id, label, style: 'short' });
+
+test('все типы из config/tickets.json собираются в модалку Discord', () => {
+  assert.ok(ticketTypes.length >= 4);
+  for (const type of ticketTypes) {
+    const json = buildFormModal(type).toJSON();
+
+    assert.equal(json.custom_id, `${FORM_MODAL_PREFIX}${type.id}`);
+    assert.equal(json.components.length, type.fields.length);
+    assert.deepEqual(
+      json.components.map((row) => row.components[0].custom_id),
+      type.fields.map((f) => f.id),
+    );
+  }
 });
 
 test('модалка не может быть больше 5 полей', () => {
-  const field = (id) => ({ id, label: `Вопрос ${id}`, style: 'short' });
-  const data = { title: 'Тест', fields: ['a', 'b', 'c', 'd', 'e', 'f'].map(field) };
-
-  assert.throws(() => loadForm(writeForm(data)), /не больше 5/);
+  const fields = ['a', 'b', 'c', 'd', 'e', 'f'].map((id) => field(id));
+  assert.throws(() => loadTicketConfig(writeConfig([typeWith(fields)])), /не больше 5/);
 });
 
 test('подпись поля длиннее 45 символов отклоняется', () => {
-  const data = { title: 'Тест', fields: [{ id: 'a', label: 'я'.repeat(46), style: 'short' }] };
-  assert.throws(() => loadForm(writeForm(data)), /45 символов/);
+  const fields = [field('a', 'я'.repeat(46))];
+  assert.throws(() => loadTicketConfig(writeConfig([typeWith(fields)])), /45 символов/);
 });
 
 test('повторяющийся id поля отклоняется', () => {
-  const data = {
-    title: 'Тест',
-    fields: [
-      { id: 'a', label: 'Один', style: 'short' },
-      { id: 'a', label: 'Два', style: 'short' },
-    ],
-  };
-  assert.throws(() => loadForm(writeForm(data)), /Повторяется id/);
+  assert.throws(
+    () => loadTicketConfig(writeConfig([typeWith([field('a', 'Один'), field('a', 'Два')])])),
+    /повторяется id поля/,
+  );
+});
+
+test('тип без существующей панели отклоняется', () => {
+  assert.throws(
+    () => loadTicketConfig(writeConfig([typeWith([field('a')], { panel: 'нет' })])),
+    /нет панели/,
+  );
 });

@@ -1,26 +1,26 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { form, validateAnswers } from '../src/form.js';
+import { findType, validateAnswers } from '../src/form.js';
 
-const answersFrom = (values) =>
-  form.fields.map((field) => ({ id: field.id, label: field.label, value: values[field.id] ?? '' }));
+const clan = findType('clan');
+const caller = findType('caller');
+const media = findType('media');
+const moderator = findType('moderator');
 
-const problemFields = (values) => validateAnswers(answersFrom(values)).map((p) => p.label);
+const answersFrom = (type, values) =>
+  type.fields.map((field) => ({ id: field.id, label: field.label, value: values[field.id] ?? '' }));
 
-test('анкета из одних единиц отклоняется (как в скриншоте)', () => {
+const problemLabels = (type, values) => validateAnswers(answersFrom(type, values), type).map((p) => p.label);
+
+test('анкета клана из одних единиц отклоняется (как в скриншоте)', () => {
   const values = { hours: '1', age: '1', daily_online: '1', goal: '1', about: '1' };
-  const fields = problemFields(values);
-  assert.ok(fields.includes('Сколько вам лет?'));
-  assert.ok(fields.includes('Цель посещения клана?'));
-  assert.ok(fields.includes('Расскажите о себе. (статы вашего пк и тд)'));
+  const labels = problemLabels(clan, values);
+  assert.ok(labels.includes('Сколько вам лет?'));
+  assert.ok(labels.includes('Цель посещения клана?'));
+  assert.ok(labels.includes('Расскажите о себе. (статы вашего пк и тд)'));
 });
 
-test('короткий средний онлайн вроде «8» не блокируется', () => {
-  assert.deepEqual(problemFields({ daily_online: '8' }).filter((l) => l.startsWith('Ваш суточный')), []);
-  assert.deepEqual(problemFields({ hours: '4' }).filter((l) => l === 'Сколько у вас часов?'), []);
-});
-
-test('нормальные ответы из реальных заявок проходят', () => {
+test('нормальные ответы клана из реальных заявок проходят', () => {
   const values = {
     hours: '4к в общем',
     age: '16 годиков',
@@ -28,20 +28,38 @@ test('нормальные ответы из реальных заявок пр�
     goal: 'Попробовать себя не в соло игре',
     about: 'Ртх 4060 16 ОЗУ проц не помню, веселый тип даю импакты в клан помогаю развить',
   };
-  assert.deepEqual(validateAnswers(answersFrom(values)), []);
+  assert.deepEqual(validateAnswers(answersFrom(clan, values), clan), []);
 });
 
-test('возраст вне диапазона 10–90 отклоняется', () => {
-  assert.deepEqual(problemFields({ age: '5' }).filter((l) => l === 'Сколько вам лет?'), ['Сколько вам лет?']);
-  assert.deepEqual(problemFields({ age: '120' }).filter((l) => l === 'Сколько вам лет?'), ['Сколько вам лет?']);
+test('короткий средний онлайн вроде «8» не блокируется', () => {
+  assert.equal(problemLabels(clan, { daily_online: '8' }).includes('Ваш суточный средний онлайн?'), false);
+  assert.equal(problemLabels(clan, { hours: '4' }).includes('Сколько у вас часов?'), false);
 });
 
-test('часы и онлайн без цифр отклоняются', () => {
-  assert.ok(problemFields({ hours: 'много' }).includes('Сколько у вас часов?'));
-  assert.ok(problemFields({ daily_online: 'ну так' }).includes('Ваш суточный средний онлайн?'));
+test('возраст клана вне диапазона 10–90 отклоняется', () => {
+  assert.ok(problemLabels(clan, { age: '5' }).includes('Сколько вам лет?'));
+  assert.ok(problemLabels(clan, { age: '120' }).includes('Сколько вам лет?'));
 });
 
-test('развёрнутые поля требуют слов, а не цифр', () => {
-  assert.ok(problemFields({ goal: '11111111111' }).includes('Цель посещения клана?'));
-  assert.ok(problemFields({ about: '123 456 789 000 111' }).includes('Расскажите о себе. (статы вашего пк и тд)'));
+test('коллер младше 16 лет отклоняется, 16 и больше проходит', () => {
+  assert.ok(problemLabels(caller, { age: '15', hours: '100' }).includes('Сколько вам лет?'));
+  assert.equal(problemLabels(caller, { age: '16', hours: '100' }).length, 0);
+});
+
+test('медиа без ссылки на канал отклоняется, со ссылкой проходит', () => {
+  const base = { content: 'стримы и нарезки по игре' };
+  assert.ok(problemLabels(media, { ...base, channel: 'мой канал' }).includes('Ссылка на ваш канал'));
+  assert.equal(problemLabels(media, { ...base, channel: 'youtube.com/@mychannel' }).length, 0);
+});
+
+test('вторая ссылка у медиа необязательна, но если заполнена, должна быть ссылкой', () => {
+  const base = { channel: 'https://twitch.tv/x', content: 'стримы и нарезки по игре' };
+  assert.equal(problemLabels(media, { ...base, extra_link: '' }).length, 0);
+  assert.ok(problemLabels(media, { ...base, extra_link: 'просто текст' }).includes('Вторая ссылка (необязательно)'));
+});
+
+test('модератор с одними единицами отклоняется по опыту и мотивации', () => {
+  const labels = problemLabels(moderator, { age: '20', hours: '500', mod_experience: '1', why: '1' });
+  assert.ok(labels.includes('Опыт модерации (где и сколько)'));
+  assert.ok(labels.includes('Почему хотите стать модератором?'));
 });

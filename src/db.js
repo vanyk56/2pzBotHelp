@@ -14,6 +14,9 @@ CREATE TABLE IF NOT EXISTS tickets (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now()
 );
 
+-- Тип тикета (клан, коллер, медиа, модератор); старые заявки получают 'clan'
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS ticket_type TEXT NOT NULL DEFAULT 'clan';
+
 -- Одна незакрытая заявка на игрока
 CREATE UNIQUE INDEX IF NOT EXISTS tickets_one_active_per_user
   ON tickets (user_id) WHERE status <> 'closed';
@@ -52,11 +55,11 @@ export function createDb(connectionString) {
       return rows[0] ?? null;
     },
 
-    async createTicket({ guildId, channelId, userId, username, answers }) {
+    async createTicket({ guildId, channelId, userId, username, type, answers }) {
       const { rows } = await pool.query(
-        `INSERT INTO tickets (guild_id, channel_id, user_id, username, answers)
-         VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-        [guildId, channelId, userId, username, JSON.stringify(answers)],
+        `INSERT INTO tickets (guild_id, channel_id, user_id, username, ticket_type, answers)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [guildId, channelId, userId, username, type, JSON.stringify(answers)],
       );
       return rows[0];
     },

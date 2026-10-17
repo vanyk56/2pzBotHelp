@@ -24,7 +24,11 @@ export const config = {
   discord: {
     token: required('DISCORD_TOKEN'),
     guildId: required('GUILD_ID'),
-    panelChannelId: required('PANEL_CHANNEL_ID'),
+    // main — канал с кнопкой клана, secondary — канал с коллером, медиа и модератором (необязательно)
+    panelChannels: {
+      main: required('PANEL_CHANNEL_ID'),
+      secondary: optional('SECONDARY_PANEL_CHANNEL_ID'),
+    },
     ticketCategoryId: required('TICKET_CATEGORY_ID'),
     staffRoleIds,
     voiceChannelId: optional('VOICE_CHANNEL_ID'),
