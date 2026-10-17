@@ -162,12 +162,55 @@ async function listGuildMembers(guild) {
   return members;
 }
 
-// Участники выбранной роли, которые ещё не ответили. null — если роль для сбора не выбрана
+// Участники, которые ещё не ответили. Если роль не выбрана, проверяем всех участников сервера
+// (id роли @everyone совпадает с id сервера)
 async function pendingMembers(guild, roleId, rsvps) {
-  if (!roleId) return null;
+  const target = roleId ?? guild.id;
+  const everyone = target === guild.id;
   const responded = new Set(rsvps.map((r) => r.user_id));
   const members = await listGuildMembers(guild);
-  return members.filter((m) => !m.user.bot && m.roles.cache.has(roleId) && !responded.has(m.id));
+  return members.filter(
+    (m) => !m.user.bot && (everyone || m.roles.cache.has(target)) && !responded.has(m.id),
+  );
+}
+
+// Список упоминаний в одном поле embed (до 1024 символов); хвост заменяется на «и ещё N»
+function mentionList(ids) {
+  if (ids.length === 0) return '—';
+  let text = '';
+  for (let i = 0; i < ids.length; i += 1) {
+    const next = `<@${ids[i]}>`;
+    const candidate = text ? `${text} ${next}` : next;
+    if (candidate.length > 1000) return `${text} и ещё ${ids.length - i}`;
+    text = candidate;
+  }
+  return text;
+}
+
+// Окно для админа: кто будет, опаздывает, не будет и кто не ответил. Упоминания не пингуют
+export function renderLists(event, rsvps, pending) {
+  const byStatus = { going: [], late: [], no: [] };
+  for (const { user_id: userId, status } of rsvps) byStatus[status]?.push(userId);
+
+  const embed = new EmbedBuilder()
+    .setColor(0x2b2d31)
+    .setTitle(`Сбор: ${event.data.title}`)
+    .addFields(
+      { name: `✅ Буду · ${byStatus.going.length}`, value: mentionList(byStatus.going) },
+      { name: `⏰ Опаздывают · ${byStatus.late.length}`, value: mentionList(byStatus.late) },
+      { name: `❌ Не будут · ${byStatus.no.length}`, value: mentionList(byStatus.no) },
+      { name: `❔ Не ответили · ${pending.length}`, value: mentionList(pending.map((m) => m.id)) },
+    );
+
+  const components = [];
+  if (pending.length > 0) {
+    components.push(
+      new ActionRowBuilder().addComponents(
+        button(`event:remind:${event.id}`, 'Напомнить не ответившим', ButtonStyle.Primary, '📣'),
+      ),
+    );
+  }
+  return { embeds: [embed], components };
 }
 
 async function renderImage(render, what) {
@@ -202,11 +245,11 @@ export function createEventBot({ db, servers }) {
     for (const { status } of rsvps) counts[status] += 1;
 
     const pending = await pendingMembers(guild, event.role_id, rsvps);
-    const view = renderEvent(event, { ...counts, pending: pending?.length ?? null }, {
+    const view = renderEvent(event, { ...counts, pending: pending.length }, {
       ...options,
       emoji: resolveEmoji(guild),
     });
-    return { view, pending };
+    return { view, pending, rsvps };
   }
 
   async function createEvent(interaction, server) {
@@ -238,7 +281,8 @@ export function createEventBot({ db, servers }) {
       guildId: interaction.guildId,
       channelId: interaction.channelId,
       data,
-      roleId: role?.id ?? null,
+      // Без роли проверяем всех участников сервера
+      roleId: role?.id ?? interaction.guildId,
     });
 
     // Картинки не ломают сбор: если что-то не нарисовалось, публикуем без неё
@@ -277,17 +321,29 @@ export function createEventBot({ db, servers }) {
     await interaction.editReply({ components: view.components });
   }
 
+  // Списки для модерации: личное окно, видно только нажавшему
   async function handleCheck(interaction, server, rawId) {
     if (!isStaff(interaction.member, server)) return replyEphemeral(interaction, 'Эта кнопка доступна только модерации.');
     const event = await loadEvent(interaction, rawId);
     if (!event) return;
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const { pending, rsvps } = await buildView(event, interaction.guild);
+    return interaction.editReply(renderLists(event, rsvps, pending));
+  }
+
+  // Напоминание только тем, кто не ответил. Пинги идут в канал сбора
+  async function handleRemind(interaction, server, rawId) {
+    if (!isStaff(interaction.member, server)) return replyEphemeral(interaction, 'Эта кнопка доступна только модерации.');
+    const event = await loadEvent(interaction, rawId);
+    if (!event) return;
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const { pending } = await buildView(event, interaction.guild);
-    if (pending === null) return interaction.editReply('В этом сборе не выбрана роль для проверки.');
     if (pending.length === 0) return interaction.editReply('Все ответили.');
 
-    for (const ids of chunk(pending.map((m) => m.id), MENTIONS_PER_MESSAGE)) {
+    for (const members of chunk(pending, MENTIONS_PER_MESSAGE)) {
+      const ids = members.map((m) => m.id);
       await interaction.channel.send({
         content: `Не ответили на сбор «${event.data.title}»: ${ids.map((id) => `<@${id}>`).join(' ')}`,
         allowedMentions: { users: ids },
@@ -311,6 +367,7 @@ export function createEventBot({ db, servers }) {
       const [, kind, rawId, status] = interaction.customId.split(':');
       if (kind === 'rsvp') await handleRsvp(interaction, rawId, status);
       if (kind === 'check') await handleCheck(interaction, server, rawId);
+      if (kind === 'remind') await handleRemind(interaction, server, rawId);
       return true;
     }
 

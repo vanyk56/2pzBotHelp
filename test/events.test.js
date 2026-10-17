@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { renderBanner, renderGrid } from '../src/banner.js';
-import { EVENT_COMMAND, moscowWeekday, parseMoscowStart, renderEvent } from '../src/events.js';
+import { EVENT_COMMAND, moscowWeekday, parseMoscowStart, renderEvent, renderLists } from '../src/events.js';
 import { EVENT_EMOJI } from '../src/events-emoji.js';
 
 test('дата и время по МСК переводятся в UTC (МСК = UTC+3)', () => {
@@ -90,6 +90,32 @@ test('эмодзи для кнопок подготовлены: по одной
   for (const name of Object.keys(EVENT_EMOJI)) {
     assert.match(name, /^[a-z0-9_]{2,32}$/);
   }
+});
+
+test('окно модерации: четыре группы, напоминание только если кто-то не ответил', () => {
+  const rsvps = [
+    { user_id: '11', status: 'going' },
+    { user_id: '12', status: 'late' },
+    { user_id: '13', status: 'no' },
+  ];
+  const withPending = renderLists(event, rsvps, [{ id: '21' }, { id: '22' }]);
+  const embed = withPending.embeds[0].toJSON();
+  assert.equal(embed.fields.length, 4);
+  assert.equal(embed.fields[0].name, '✅ Буду · 1');
+  assert.equal(embed.fields[3].name, '❔ Не ответили · 2');
+  assert.equal(embed.fields[3].value, '<@21> <@22>');
+  assert.equal(withPending.components.length, 1);
+
+  const allAnswered = renderLists(event, rsvps, []);
+  assert.equal(allAnswered.components.length, 0);
+});
+
+test('длинный список участников сокращается, с подсказкой «и ещё N»', () => {
+  const pending = Array.from({ length: 300 }, (_, i) => ({ id: String(100000000000000000n + BigInt(i)) }));
+  const embed = renderLists(event, [], pending).embeds[0].toJSON();
+  const value = embed.fields[3].value;
+  assert.ok(value.length <= 1024);
+  assert.match(value, /и ещё \d+$/);
 });
 
 test('баннер и квадрат карты рендерятся в PNG', async () => {
