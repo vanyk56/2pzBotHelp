@@ -10,6 +10,7 @@ import {
 import { renderBanner } from './banner.js';
 
 const BANNER_NAME = 'event.png';
+const EMBED_COLOR = 0x2b2d31;
 const RSVP_STATUSES = ['going', 'late', 'no'];
 const MEMBER_PAGE = 1000;
 const MENTIONS_PER_MESSAGE = 30;
@@ -99,8 +100,10 @@ export function renderEvent(event, stats, { bannerName = null } = {}) {
   const { id, data } = event;
   const pendingLabel = stats.pending === null ? 'Проверка' : `Проверка · не ответили: ${stats.pending}`;
 
-  const embed = new EmbedBuilder()
-    .setColor(0x2b2d31)
+  // Кнопки Discord выводит под всеми embed сообщения, внутрь embed их не поставить.
+  // Поэтому баннер — отдельный embed сверху, текст — следующий, оба одного цвета, чтобы выглядело одним блоком
+  const text = new EmbedBuilder()
+    .setColor(EMBED_COLOR)
     .setDescription(`**Начало:** <t:${data.startsUnix}:F> (<t:${data.startsUnix}:R>)`)
     .addFields(
       {
@@ -110,8 +113,12 @@ export function renderEvent(event, stats, { bannerName = null } = {}) {
       { name: 'Подключение', value: codeBlock(data.connect) },
       { name: 'Пароль', value: codeBlock(data.password) },
     );
-  if (bannerName) embed.setImage(`attachment://${bannerName}`);
-  else embed.setTitle(data.title);
+  const embeds = [text];
+  if (bannerName) {
+    embeds.unshift(new EmbedBuilder().setColor(EMBED_COLOR).setImage(`attachment://${bannerName}`));
+  } else {
+    text.setTitle(data.title);
+  }
 
   const answers = new ActionRowBuilder().addComponents(
     button(`event:rsvp:${id}:going`, `Буду на вайпе · ${stats.going}`, ButtonStyle.Success, '✅'),
@@ -122,7 +129,7 @@ export function renderEvent(event, stats, { bannerName = null } = {}) {
     button(`event:check:${id}`, pendingLabel, ButtonStyle.Secondary, '🔎'),
   );
 
-  return { embeds: [embed], components: [answers, check] };
+  return { embeds, components: [answers, check] };
 }
 
 // Все участники сервера через REST: привилегированные intents не нужны

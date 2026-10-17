@@ -51,16 +51,16 @@ test('без роли кнопка проверки без счётчика', ()
   assert.equal(rows[1].components[0].label, 'Проверка');
 });
 
-test('с баннером embed без заголовка, картинка подключается по имени файла', () => {
-  const embed = renderEvent(event, { going: 0, late: 0, no: 0, pending: null }, { bannerName: 'event.png' })
-    .embeds[0]
-    .toJSON();
-  assert.equal(embed.title, undefined);
-  assert.equal(embed.image.url, 'attachment://event.png');
+test('с баннером первый embed — картинка, второй — текст без заголовка', () => {
+  const [image, text] = renderEvent(event, { going: 0, late: 0, no: 0, pending: null }, { bannerName: 'event.png' })
+    .embeds.map((e) => e.toJSON());
+  assert.equal(image.image.url, 'attachment://event.png');
+  assert.equal(text.title, undefined);
+  assert.equal(image.color, text.color);
 });
 
-test('без баннера embed с названием, строкой начала и блоком данных для копирования', () => {
-  const embed = renderEvent(event, { going: 0, late: 0, no: 0, pending: null }).embeds[0].toJSON();
+test('без баннера один embed с названием, строкой начала и блоком данных для копирования', () => {
+  const [embed] = renderEvent(event, { going: 0, late: 0, no: 0, pending: null }).embeds.map((e) => e.toJSON());
   assert.equal(embed.title, 'Я');
   assert.match(embed.description, /\*\*Начало:\*\* <t:1765530000:F> \(<t:1765530000:R>\)/);
   const fields = Object.fromEntries(embed.fields.map((f) => [f.name, f.value]));
