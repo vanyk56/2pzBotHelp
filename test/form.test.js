@@ -59,9 +59,3 @@ test('повторяющийся id поля отклоняется', () => {
   );
 });
 
-test('тип без существующей панели отклоняется', () => {
-  assert.throws(
-    () => loadTicketConfig(writeConfig([typeWith([field('a')], { panel: 'нет' })])),
-    /нет панели/,
-  );
-});

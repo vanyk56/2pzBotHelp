@@ -12,7 +12,6 @@
   "types": [
     {
       "id": "clan",
-      "panel": "main",
       "name": "Заявка в клан 2pz",
       "button": "Подать тикет",
       "emoji": "🎫",
@@ -69,7 +68,6 @@
     },
     {
       "id": "caller",
-      "panel": "secondary",
       "name": "Коллер (16+)",
       "button": "Коллер 16+",
       "emoji": "📞",
@@ -99,7 +97,6 @@
     },
     {
       "id": "media",
-      "panel": "secondary",
       "name": "Медиа клана",
       "button": "Медиа клана",
       "emoji": "🎬",
@@ -138,7 +135,6 @@
     },
     {
       "id": "moderator",
-      "panel": "secondary",
       "name": "Модератор",
       "button": "Модератор",
       "emoji": "🛡️",

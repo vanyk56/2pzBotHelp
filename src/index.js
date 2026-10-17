@@ -5,7 +5,7 @@ import { createAiClient } from './ai.js';
 import { createTicketBot } from './tickets.js';
 
 const COMMANDS = [
-  { name: 'panel', description: 'Опубликовать и закрепить кнопку подачи заявки' },
+  { name: 'panel', description: 'Опубликовать и закрепить кнопки подачи заявок в этом канале' },
   { name: 'close', description: 'Закрыть тикет и удалить его канал' },
 ];
 
@@ -19,17 +19,25 @@ const bot = createTicketBot({
   client,
   db,
   ai,
-  config: config.discord,
+  servers: config.discord.servers,
   contextMessages: config.ai.contextMessages,
 });
 
 client.once(Events.ClientReady, async (readyClient) => {
   await db.init();
 
-  const guild = await readyClient.guilds.fetch(config.discord.guildId);
-  await guild.commands.set(COMMANDS);
+  // Команды регистрируем на каждом сервере из servers.json
+  for (const server of config.discord.servers) {
+    try {
+      const guild = await readyClient.guilds.fetch(server.guildId);
+      await guild.commands.set(COMMANDS);
+      console.log(`Команды зарегистрированы на сервере «${server.name}» (${guild.name})`);
+    } catch (error) {
+      console.error(`Не удалось зарегистрировать команды на сервере «${server.name}»:`, error.message);
+    }
+  }
 
-  console.log(`Бот ${readyClient.user.tag} запущен, команды зарегистрированы на сервере ${guild.name}`);
+  console.log(`Бот ${readyClient.user.tag} запущен`);
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {

@@ -42,7 +42,6 @@ export function loadTicketConfig(url) {
     }
     if (typeIds.has(type.id)) throw new Error(`Повторяется тип «${type.id}»`);
     typeIds.add(type.id);
-    if (!data.panels[type.panel]) throw new Error(`Тип «${type.id}»: нет панели «${type.panel}»`);
     if (!type.title || type.title.length > MAX_TITLE) {
       throw new Error(`Тип «${type.id}»: заголовок должен быть от 1 до ${MAX_TITLE} символов`);
     }

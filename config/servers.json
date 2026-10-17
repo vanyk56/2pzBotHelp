@@ -1,0 +1,29 @@
+{
+  "servers": [
+    {
+      "name": "2pz",
+      "guildId": "REPLACE_2PZ_GUILD_ID",
+      "panelChannelId": "REPLACE_2PZ_PANEL_CHANNEL_ID",
+      "panelKey": "main",
+      "types": ["clan"],
+      "ticketCategoryId": "REPLACE_2PZ_CATEGORY_ID",
+      "staffRoleIds": [
+        "1424466632511852654",
+        "1548588658733482004",
+        "1559166190600060978",
+        "1424476290513113169"
+      ],
+      "voiceChannelId": null
+    },
+    {
+      "name": "Сервер 2",
+      "guildId": "REPLACE_SERVER2_GUILD_ID",
+      "panelChannelId": "REPLACE_SERVER2_PANEL_CHANNEL_ID",
+      "panelKey": "secondary",
+      "types": ["caller", "media", "moderator"],
+      "ticketCategoryId": "REPLACE_SERVER2_CATEGORY_ID",
+      "staffRoleIds": ["REPLACE_SERVER2_ROLE_ID"],
+      "voiceChannelId": null
+    }
+  ]
+}

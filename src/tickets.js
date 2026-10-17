@@ -18,7 +18,7 @@ import {
 import { buildMessages, greetingRequest, statusTitle } from './assistant.js';
 import { slugify, splitMessage } from './utils.js';
 
-// Кнопка открытия формы: ticket:open:<id типа>. Старый ticket:open означает клан (панели в канале до перехода)
+// Кнопка открытия формы: ticket:open:<id типа>. Старый ticket:open означает клан (панели, опубликованные до перехода)
 const OPEN_PREFIX = 'ticket:open:';
 const LEGACY_OPEN_ID = 'ticket:open';
 const ACTION_PREFIX = 'ticket:act:';
@@ -66,7 +66,7 @@ function closedEmbed(note) {
   const lines = [
     note,
     'Канал и история сообщений будут удалены через 10 секунд.',
-    'Спасибо за обращение в клан 2pz! Если вопрос возникнет снова, создайте новый тикет.',
+    'Спасибо за обращение! Если вопрос возникнет снова, создайте новый тикет.',
   ];
   return new EmbedBuilder()
     .setColor(0xed4245)
@@ -74,14 +74,15 @@ function closedEmbed(note) {
     .setDescription(lines.filter(Boolean).join('\n\n'));
 }
 
-export function createTicketBot({ client, db, ai, config, contextMessages }) {
-  const { staffRoleIds } = config;
+export function createTicketBot({ client, db, ai, servers, contextMessages }) {
+  // Бот работает на нескольких серверах: настройки берём по ID сервера, с которого пришло событие
+  const serverByGuild = new Map(servers.map((server) => [server.guildId, server]));
   // Ответы модели идут по одному на канал, чтобы не перемешивались
   const queues = new Map();
 
-  const isStaff = (member) => {
+  const isStaff = (member, server) => {
     const roles = Array.isArray(member?.roles) ? member.roles : [...(member?.roles?.cache?.keys() ?? [])];
-    return roles.some((id) => staffRoleIds.includes(id));
+    return roles.some((id) => server.staffRoleIds.includes(id));
   };
 
   const replyEphemeral = (interaction, content) =>
@@ -135,7 +136,7 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     );
   }
 
-  async function postApplication(channel, ticket, type) {
+  async function postApplication(channel, ticket, type, server) {
     const embed = new EmbedBuilder()
       .setTitle('Заявление')
       .setColor(0x5865f2)
@@ -151,35 +152,35 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
       .setTimestamp(new Date(ticket.created_at));
 
     const message = await channel.send({
-      content: `${staffRoleIds.map((id) => `<@&${id}>`).join(' ')} <@${ticket.user_id}>`,
+      content: `${server.staffRoleIds.map((id) => `<@&${id}>`).join(' ')} <@${ticket.user_id}>`,
       embeds: [embed],
       components: [staffRow()],
-      allowedMentions: { roles: staffRoleIds, users: [ticket.user_id] },
+      allowedMentions: { roles: server.staffRoleIds, users: [ticket.user_id] },
     });
     await message.pin().catch((error) => console.warn('Не удалось закрепить заявку:', error.message));
   }
 
-  // Панель одного канала: описание и кнопка на каждый тип, привязанный к этой панели
-  function panelPayload(panelKey) {
-    const panel = ticketConfig.panels[panelKey];
+  // Панель сервера: текст из tickets.json и кнопка на каждый тип, включённый на этом сервере
+  function panelPayload(server) {
+    const panel = ticketConfig.panels[server.panelKey];
     const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(panel.title).setDescription(panel.description);
 
-    const buttons = ticketConfig.types
-      .filter((type) => type.panel === panelKey)
-      .map((type) => {
-        const button = new ButtonBuilder()
-          .setCustomId(`${OPEN_PREFIX}${type.id}`)
-          .setLabel(type.button)
-          .setStyle(ButtonStyle.Primary);
-        if (type.emoji) button.setEmoji(type.emoji);
-        return button;
-      });
+    const buttons = server.types.map((typeId) => {
+      const type = findType(typeId);
+      const button = new ButtonBuilder()
+        .setCustomId(`${OPEN_PREFIX}${type.id}`)
+        .setLabel(type.button)
+        .setStyle(ButtonStyle.Primary);
+      if (type.emoji) button.setEmoji(type.emoji);
+      return button;
+    });
 
     return { embeds: [embed], components: [new ActionRowBuilder().addComponents(buttons)] };
   }
 
-  // Публикует панель и снимает старые панели бота, чтобы в канале оставалась одна актуальная
-  async function publishPanel(channel, panelKey) {
+  // Публикует панель сервера и снимает старые панели бота, чтобы в канале оставалась одна актуальная
+  async function publishPanel(server) {
+    const channel = await client.channels.fetch(server.panelChannelId);
     const pins = await channel.messages.fetchPins().catch(() => null);
     for (const { message } of pins?.items ?? []) {
       const isOldPanel =
@@ -190,24 +191,22 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
       if (isOldPanel) await message.delete().catch(() => {});
     }
 
-    const panel = await channel.send(panelPayload(panelKey));
+    const panel = await channel.send(panelPayload(server));
     await panel.pin();
+    return channel;
   }
 
-  async function panelCommand(interaction) {
-    if (!isStaff(interaction.member)) return replyEphemeral(interaction, 'Команда только для модерации.');
+  async function panelCommand(interaction, server) {
+    if (!isStaff(interaction.member, server)) return replyEphemeral(interaction, 'Команда только для модерации.');
 
-    const published = [];
-    for (const [panelKey, channelId] of Object.entries(config.panelChannels)) {
-      if (!channelId) continue;
-      const channel = await client.channels.fetch(channelId);
-      await publishPanel(channel, panelKey);
-      published.push(`<#${channel.id}>`);
+    const channel = await publishPanel(server);
+    return replyEphemeral(interaction, `Панель опубликована в <#${channel.id}>.`);
+  }
+
+  async function openFormModal(interaction, type, server) {
+    if (!type || !server.types.includes(type.id)) {
+      return replyEphemeral(interaction, 'Этот тип тикета недоступен на этом сервере.');
     }
-    return replyEphemeral(interaction, `Панели опубликованы: ${published.join(', ')}.`);
-  }
-
-  async function openFormModal(interaction, type) {
     const active = await db.findActiveTicketByUser(interaction.user.id);
     if (active) {
       return replyEphemeral(interaction, `У вас уже есть открытая заявка: <#${active.channel_id}>`);
@@ -215,7 +214,7 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     return interaction.showModal(buildFormModal(type));
   }
 
-  async function submitForm(interaction, type) {
+  async function submitForm(interaction, type, server) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const { guild, user } = interaction;
@@ -236,12 +235,12 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     const channel = await guild.channels.create({
       name: `${type.channelPrefix}-${slugify(user.username, user.id)}`,
       type: ChannelType.GuildText,
-      parent: config.ticketCategoryId,
+      parent: server.ticketCategoryId,
       topic: `${type.name} · ${user.id}`,
       permissionOverwrites: [
         { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
         { id: user.id, allow: ACTIVE_PERMS },
-        ...staffRoleIds.map((id) => ({
+        ...server.staffRoleIds.map((id) => ({
           id,
           allow: [...ACTIVE_PERMS, PermissionFlagsBits.ManageMessages],
         })),
@@ -273,7 +272,7 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
       throw error;
     }
 
-    await postApplication(channel, ticket, type);
+    await postApplication(channel, ticket, type, server);
     await interaction.editReply(`Заявка создана: <#${channel.id}>`);
 
     enqueue(channel.id, () =>
@@ -292,8 +291,8 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     }, DELETE_DELAY_MS);
   }
 
-  function actionText(action, ticket) {
-    const voice = config.voiceChannelId ? `Подключайтесь в голосовой канал <#${config.voiceChannelId}>.` : '';
+  function actionText(action, ticket, server) {
+    const voice = server.voiceChannelId ? `Подключайтесь в голосовой канал <#${server.voiceChannelId}>.` : '';
     const texts = {
       accept: `✅ <@${ticket.user_id}>, заявка **принята**. Поздравляем! Дальнейшие шаги будут в этом канале.`,
       review: '⏳ Заявка взята на **рассмотрение**. Ожидайте решения модераторов.',
@@ -302,8 +301,10 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     return texts[action];
   }
 
-  async function staffAction(interaction, action) {
-    if (!isStaff(interaction.member)) return replyEphemeral(interaction, 'Эта кнопка доступна только модерации.');
+  async function staffAction(interaction, action, server) {
+    if (!isStaff(interaction.member, server)) {
+      return replyEphemeral(interaction, 'Эта кнопка доступна только модерации.');
+    }
 
     const ticket = await db.findTicketByChannel(interaction.channelId);
     const button = STAFF_BUTTONS.find((b) => b.action === action);
@@ -326,13 +327,13 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     });
 
     return interaction.reply({
-      content: actionText(action, ticket),
+      content: actionText(action, ticket, server),
       allowedMentions: { users: [ticket.user_id] },
     });
   }
 
-  async function closeCommand(interaction) {
-    if (!isStaff(interaction.member)) return replyEphemeral(interaction, 'Команда только для модерации.');
+  async function closeCommand(interaction, server) {
+    if (!isStaff(interaction.member, server)) return replyEphemeral(interaction, 'Команда только для модерации.');
 
     const ticket = await db.findTicketByChannel(interaction.channelId);
     if (!ticket) return replyEphemeral(interaction, 'Это не канал заявки.');
@@ -341,35 +342,39 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
   }
 
   async function handleInteraction(interaction) {
+    const server = serverByGuild.get(interaction.guildId);
+    if (!server) return null;
+
     if (interaction.isChatInputCommand()) {
-      if (interaction.commandName === 'panel') return panelCommand(interaction);
-      if (interaction.commandName === 'close') return closeCommand(interaction);
+      if (interaction.commandName === 'panel') return panelCommand(interaction, server);
+      if (interaction.commandName === 'close') return closeCommand(interaction, server);
       return null;
     }
 
     if (interaction.isButton()) {
       const id = interaction.customId;
-      if (id === LEGACY_OPEN_ID) return openFormModal(interaction, findType('clan'));
+      if (id === LEGACY_OPEN_ID) return openFormModal(interaction, findType('clan'), server);
       if (id.startsWith(OPEN_PREFIX)) {
-        const type = findType(id.slice(OPEN_PREFIX.length));
-        return type ? openFormModal(interaction, type) : null;
+        return openFormModal(interaction, findType(id.slice(OPEN_PREFIX.length)), server);
       }
       if (id.startsWith(ACTION_PREFIX)) {
-        return staffAction(interaction, id.slice(ACTION_PREFIX.length));
+        return staffAction(interaction, id.slice(ACTION_PREFIX.length), server);
       }
       return null;
     }
 
     if (interaction.isModalSubmit() && interaction.customId.startsWith(FORM_MODAL_PREFIX)) {
       const type = findType(interaction.customId.slice(FORM_MODAL_PREFIX.length));
-      return type ? submitForm(interaction, type) : null;
+      if (!type || !server.types.includes(type.id)) return null;
+      return submitForm(interaction, type, server);
     }
     return null;
   }
 
   // Сообщения в канале заявки: ответы ассистента на игрока, заметки модерации в память
   async function handleMessage(message) {
-    if (!message.guild || message.guild.id !== config.guildId) return;
+    const server = serverByGuild.get(message.guild?.id);
+    if (!server) return;
     if (message.author.bot) return;
 
     const ticket = await db.findTicketByChannel(message.channelId);
@@ -379,7 +384,7 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     if (!content) return;
 
     if (message.author.id !== ticket.user_id) {
-      if (isStaff(message.member)) {
+      if (isStaff(message.member, server)) {
         await db.addMessage(ticket.id, {
           role: 'staff',
           authorId: message.author.id,
@@ -405,5 +410,5 @@ export function createTicketBot({ client, db, ai, config, contextMessages }) {
     enqueue(message.channelId, () => respond(message.channel, { fallback: REPLY_FALLBACK, skippable: true }));
   }
 
-  return { publishPanel, handleInteraction, handleMessage };
+  return { handleInteraction, handleMessage };
 }
