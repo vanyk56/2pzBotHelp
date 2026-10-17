@@ -2,11 +2,11 @@
   "servers": [
     {
       "name": "2pz",
-      "guildId": "REPLACE_2PZ_GUILD_ID",
-      "panelChannelId": "REPLACE_2PZ_PANEL_CHANNEL_ID",
+      "guildId": "1424464968438382767",
+      "panelChannelId": "1559511515684413530",
       "panelKey": "main",
       "types": ["clan"],
-      "ticketCategoryId": "REPLACE_2PZ_CATEGORY_ID",
+      "ticketCategoryId": "1559514656320651325",
       "staffRoleIds": [
         "1424466632511852654",
         "1548588658733482004",
