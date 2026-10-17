@@ -100,14 +100,18 @@ export function renderEvent(event, stats, { bannerName = null } = {}) {
   const pendingLabel = stats.pending === null ? 'Проверка' : `Проверка · не ответили: ${stats.pending}`;
 
   const embed = new EmbedBuilder()
-    .setColor(0x5865f2)
+    .setColor(0x2b2d31)
+    .setDescription(`**Начало:** <t:${data.startsUnix}:F> (<t:${data.startsUnix}:R>)`)
     .addFields(
-      { name: 'Старт у вас', value: `<t:${data.startsUnix}:F> · <t:${data.startsUnix}:R>` },
+      {
+        name: '📋 Данные для копирования',
+        value: `**Сервер:** ${data.title}\n**Дата и время:** ${data.date} ${data.time} МСК`,
+      },
       { name: 'Подключение', value: codeBlock(data.connect) },
-      { name: 'Пароль', value: codeBlock(data.password), inline: true },
+      { name: 'Пароль', value: codeBlock(data.password) },
     );
   if (bannerName) embed.setImage(`attachment://${bannerName}`);
-  else embed.setTitle(data.title).setDescription(`**ВАЙП** · время указано по МСК · ${data.date} ${data.time} (МСК)`);
+  else embed.setTitle(data.title);
 
   const answers = new ActionRowBuilder().addComponents(
     button(`event:rsvp:${id}:going`, `Буду на вайпе · ${stats.going}`, ButtonStyle.Success, '✅'),

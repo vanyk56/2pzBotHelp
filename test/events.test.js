@@ -59,13 +59,15 @@ test('с баннером embed без заголовка, картинка по
   assert.equal(embed.image.url, 'attachment://event.png');
 });
 
-test('без баннера embed с названием и датой, блоки подключения и пароля для копирования', () => {
+test('без баннера embed с названием, строкой начала и блоком данных для копирования', () => {
   const embed = renderEvent(event, { going: 0, late: 0, no: 0, pending: null }).embeds[0].toJSON();
   assert.equal(embed.title, 'Я');
+  assert.match(embed.description, /\*\*Начало:\*\* <t:1765530000:F> \(<t:1765530000:R>\)/);
   const fields = Object.fromEntries(embed.fields.map((f) => [f.name, f.value]));
+  assert.match(fields['📋 Данные для копирования'], /\*\*Сервер:\*\* Я/);
+  assert.match(fields['📋 Данные для копирования'], /12\.12\.2026 12:00 МСК/);
   assert.match(fields['Подключение'], /connect 12\.324\.2412\.532:67/);
   assert.match(fields['Пароль'], /3041/);
-  assert.match(fields['Старт у вас'], /<t:1765530000:F>/);
 });
 
 test('баннер рендерится в PNG', async () => {

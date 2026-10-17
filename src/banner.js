@@ -12,17 +12,30 @@ const PAD = 44;
 const CARD = 394;
 const FULL = INNER_WIDTH - 52;
 
+const SANS = 'DejaVu Sans';
+const MONO = 'DejaVu Sans Mono';
+
 const ACCENT = 'linear-gradient(90deg, #7c6cff 0%, #3ba3ff 100%)';
 const WARM = 'linear-gradient(90deg, #ffbe5c 0%, #ff9a3d 100%)';
+// Тёмный фон как в образце: мягкое фиолетовое свечение справа вверху и синее слева внизу
+const BACKGROUND = [
+  'radial-gradient(circle at 88% 10%, rgba(124, 108, 255, 0.42) 0%, rgba(124, 108, 255, 0) 42%)',
+  'radial-gradient(circle at 6% 100%, rgba(59, 163, 255, 0.28) 0%, rgba(59, 163, 255, 0) 38%)',
+  'linear-gradient(135deg, #22194a 0%, #120e26 62%, #0b0917 100%)',
+].join(', ');
 
-const font = (file, weight) => ({
-  name: 'DejaVu Sans',
+const font = (file, weight, name) => ({
+  name,
   data: readFileSync(new URL(`../assets/fonts/${file}`, import.meta.url)),
   weight,
   style: 'normal',
 });
-// DejaVu Sans содержит и кириллицу, и латиницу, и цифры в одном файле (satori не переключает шрифты по символам)
-const fonts = [font('DejaVuSans.ttf', 400), font('DejaVuSans-Bold.ttf', 700)];
+// DejaVu содержит кириллицу, латиницу и цифры в одном файле (satori не переключает шрифты по символам)
+const fonts = [
+  font('DejaVuSans.ttf', 400, SANS),
+  font('DejaVuSans-Bold.ttf', 700, SANS),
+  font('DejaVuSansMono-Bold.ttf', 700, MONO),
+];
 
 // satori принимает деревья { type, props } без React: каждый блок — flex-контейнер
 const box = (style, children = []) => ({ type: 'div', props: { style: { display: 'flex', ...style }, children } });
@@ -42,13 +55,16 @@ const card = (style, children) =>
 
 const label = (text) => box({ fontSize: 18, fontWeight: 700, letterSpacing: 2, color: '#a9a3cf' }, [text]);
 
+// «12 декабря 2026» без «г.», как в образце
 function dateLongMoscow(startsUnix) {
   return new Intl.DateTimeFormat('ru-RU', {
     day: 'numeric',
     month: 'long',
     year: 'numeric',
     timeZone: 'Europe/Moscow',
-  }).format(new Date(startsUnix * 1000));
+  })
+    .format(new Date(startsUnix * 1000))
+    .replace(/\s*г\.?$/, '');
 }
 
 // Баннер сбора: название, дата, время, подключение и пароль. Возвращает PNG
@@ -57,9 +73,9 @@ export async function renderBanner(data) {
     {
       width: WIDTH,
       height: HEIGHT,
-      background: 'linear-gradient(135deg, #2b2058 0%, #120e26 60%, #0c0a18 100%)',
+      background: BACKGROUND,
       color: '#ffffff',
-      fontFamily: 'DejaVu Sans',
+      fontFamily: SANS,
     },
     [
       box(
@@ -89,7 +105,7 @@ export async function renderBanner(data) {
           ]),
           card({ width: FULL, marginTop: 20 }, [
             label('ПОДКЛЮЧЕНИЕ'),
-            box({ fontSize: 32, fontWeight: 700, marginTop: 6 }, [data.connect]),
+            box({ fontFamily: MONO, fontSize: 32, fontWeight: 700, marginTop: 6 }, [data.connect]),
           ]),
           box(
             {
@@ -104,7 +120,7 @@ export async function renderBanner(data) {
             },
             [
               box({ fontSize: 20, fontWeight: 700, letterSpacing: 2 }, ['ПАРОЛЬ']),
-              box({ fontSize: 46, fontWeight: 700, letterSpacing: 10 }, [data.password]),
+              box({ fontFamily: MONO, fontSize: 46, fontWeight: 700, letterSpacing: 10 }, [data.password]),
             ],
           ),
         ],
