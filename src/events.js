@@ -173,11 +173,21 @@ async function pendingMembers(guild, roleId, rsvps) {
   const target = roleId ?? guild.id;
   const everyone = target === guild.id;
   const responded = new Set(rsvps.map((r) => r.user_id));
-  const members = await listGuildMembers(guild);
+  let members;
+  try {
+    members = await listGuildMembers(guild);
+  } catch (error) {
+    // Без доступа к участникам сбор всё равно публикуем, только «не ответивших» не считаем
+    console.warn('Нет доступа к участникам сервера:', error.message);
+    return null;
+  }
   return members.filter(
     (m) => !m.user.bot && (everyone || m.roles.cache.has(target)) && !responded.has(m.id),
   );
 }
+
+const NO_MEMBERS_TEXT =
+  'Не удалось получить список участников сервера. Включите Server Members Intent: Developer Portal → Bot → Privileged Gateway Intents, затем перезапустите бота.';
 
 // Список упоминаний в одном поле embed (до 1024 символов); хвост заменяется на «и ещё N»
 function mentionList(ids) {
@@ -250,7 +260,7 @@ export function createEventBot({ db, servers }) {
     for (const { status } of rsvps) counts[status] += 1;
 
     const pending = await pendingMembers(guild, event.role_id, rsvps);
-    const view = renderEvent(event, { ...counts, pending: pending.length }, {
+    const view = renderEvent(event, { ...counts, pending: pending ? pending.length : null }, {
       ...options,
       emoji: resolveEmoji(guild),
     });
@@ -342,6 +352,7 @@ export function createEventBot({ db, servers }) {
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const { pending, rsvps } = await buildView(event, interaction.guild);
+    if (pending === null) return interaction.editReply(NO_MEMBERS_TEXT);
     return interaction.editReply(renderLists(event, rsvps, pending));
   }
 
@@ -353,6 +364,7 @@ export function createEventBot({ db, servers }) {
 
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
     const { pending } = await buildView(event, interaction.guild);
+    if (pending === null) return interaction.editReply(NO_MEMBERS_TEXT);
     if (pending.length === 0) return interaction.editReply('Все ответили.');
 
     for (const members of chunk(pending, MENTIONS_PER_MESSAGE)) {
