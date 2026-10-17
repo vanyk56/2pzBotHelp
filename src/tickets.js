@@ -5,7 +5,10 @@ import {
   ChannelType,
   EmbedBuilder,
   MessageFlags,
+  ModalBuilder,
   PermissionFlagsBits,
+  TextInputBuilder,
+  TextInputStyle,
 } from 'discord.js';
 import {
   buildFormModal,
@@ -44,10 +47,6 @@ const CLOSING_DECISIONS = {
     verdict: 'принята',
     note: (userId) => `✅ <@${userId}>, заявка **принята**. Поздравляем!`,
   },
-  reject: {
-    verdict: 'отклонена',
-    note: () => '❌ Заявка **отклонена**.',
-  },
 };
 
 const ACTIVE_PERMS = [
@@ -55,6 +54,25 @@ const ACTIVE_PERMS = [
   PermissionFlagsBits.SendMessages,
   PermissionFlagsBits.ReadMessageHistory,
 ];
+
+// Модалка причины отказа: модератор пишет её, бот отправляет игроку в ЛС
+export const REASON_MODAL_ID = 'ticket:reason';
+
+export function buildReasonModal() {
+  const reason = new TextInputBuilder()
+    .setCustomId('reason')
+    .setLabel('Причина отказа')
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(true)
+    .setMinLength(3)
+    .setMaxLength(1000)
+    .setPlaceholder('Коротко, что не подошло. Игрок увидит это в ЛС');
+
+  return new ModalBuilder()
+    .setCustomId(REASON_MODAL_ID)
+    .setTitle('Отклонить заявку')
+    .addComponents(new ActionRowBuilder().addComponents(reason));
+}
 
 // Обращается ли сообщение к боту: упоминание или слово «бот» / «2pzbot» отдельно
 export function addressesBot(text, botId) {
@@ -283,7 +301,9 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
   // Закрывает заявку (освобождает слот у игрока), показывает плашку и удаляет канал
   async function closeTicket(interaction, decidedBy, note) {
     await db.setStatus(interaction.channelId, 'closed', decidedBy);
-    await interaction.reply({ embeds: [closedEmbed(note)] });
+    const payload = { embeds: [closedEmbed(note)] };
+    if (interaction.deferred) await interaction.editReply(payload);
+    else await interaction.reply(payload);
     setTimeout(() => {
       interaction.channel
         ?.delete('Тикет закрыт')
@@ -301,6 +321,54 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
     return texts[action];
   }
 
+  // Личное сообщение игроку с причиной отказа. Возвращает false, если ЛС закрыты
+  async function sendRejectionDm(userId, reason, guildName) {
+    try {
+      const user = await client.users.fetch(userId);
+      await user.send({
+        embeds: [
+          new EmbedBuilder()
+            .setColor(0xed4245)
+            .setTitle(`Заявка отклонена · ${guildName}`)
+            .setDescription(`**Причина:** ${reason}\n\nСпасибо за интерес! Если появятся вопросы, создайте новый тикет.`),
+        ],
+      });
+      return true;
+    } catch (error) {
+      console.warn('Не удалось отправить причину отказа в ЛС:', error.message);
+      return false;
+    }
+  }
+
+  // Отказ с причиной из модалки: ЛС игроку, плашка в канале, закрытие тикета
+  async function rejectWithReason(interaction, server) {
+    if (!isStaff(interaction.member, server)) {
+      return replyEphemeral(interaction, 'Эта кнопка доступна только модерации.');
+    }
+    await interaction.deferReply();
+
+    const ticket = await db.findTicketByChannel(interaction.channelId);
+    if (!ticket || ticket.status === 'closed') {
+      return interaction.editReply('Заявка не найдена или уже закрыта.');
+    }
+
+    const reason = interaction.fields.getTextInputValue('reason').trim();
+    const delivered = await sendRejectionDm(ticket.user_id, reason, interaction.guild.name);
+    await db.addMessage(ticket.id, {
+      role: 'system',
+      content: `Заявка отклонена (решение модератора ${interaction.user.username}). Причина: ${reason}`,
+    });
+
+    const note = [
+      `❌ Заявка **отклонена**.`,
+      `**Причина:** ${reason}`,
+      delivered ? '' : '⚠️ Причину не удалось отправить в ЛС: у игрока закрыты личные сообщения.',
+    ]
+      .filter(Boolean)
+      .join('\n\n');
+    return closeTicket(interaction, interaction.user.id, note);
+  }
+
   async function staffAction(interaction, action, server) {
     if (!isStaff(interaction.member, server)) {
       return replyEphemeral(interaction, 'Эта кнопка доступна только модерации.');
@@ -309,6 +377,9 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
     const ticket = await db.findTicketByChannel(interaction.channelId);
     const button = STAFF_BUTTONS.find((b) => b.action === action);
     if (!ticket || !button) return replyEphemeral(interaction, 'Заявка не найдена.');
+
+    // Отказ требует причину: сначала модалка, закрытие в rejectWithReason
+    if (action === 'reject') return interaction.showModal(buildReasonModal());
 
     // Решения, после которых тикет закрывается: плашка и удаление канала
     const closing = CLOSING_DECISIONS[action];
@@ -363,6 +434,9 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
       return null;
     }
 
+    if (interaction.isModalSubmit() && interaction.customId === REASON_MODAL_ID) {
+      return rejectWithReason(interaction, server);
+    }
     if (interaction.isModalSubmit() && interaction.customId.startsWith(FORM_MODAL_PREFIX)) {
       const type = findType(interaction.customId.slice(FORM_MODAL_PREFIX.length));
       if (!type || !server.types.includes(type.id)) return null;
