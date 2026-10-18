@@ -27,6 +27,8 @@ test('нормальные ответы клана из реальных зая�
     daily_online: '6+',
     goal: 'Попробовать себя не в соло игре',
     about: 'Ртх 4060 16 ОЗУ проц не помню, веселый тип даю импакты в клан помогаю развить',
+    steam: '76561198000000000',
+    telegram: '@ivan_gamer',
   };
   assert.deepEqual(validateAnswers(answersFrom(clan, values), clan), []);
 });
@@ -56,6 +58,31 @@ test('вторая ссылка у медиа необязательна, но �
   const base = { channel: 'https://twitch.tv/x', content: 'стримы и нарезки по игре' };
   assert.equal(problemLabels(media, { ...base, extra_link: '' }).length, 0);
   assert.ok(problemLabels(media, { ...base, extra_link: 'просто текст' }).includes('Вторая ссылка (необязательно)'));
+});
+
+test('клан: Steam принимает 17 цифр, ссылку на профиль или ник, Telegram — @username или t.me', () => {
+  const values = (steam, telegram) => ({
+    hours: '100',
+    age: '18',
+    daily_online: '4',
+    goal: 'Играть в клане и помогать',
+    about: 'Пк рыжий с видеокартой, играю давно',
+    steam,
+    telegram,
+  });
+  const clanSteamProblem = (steam, telegram = '@ivan_gamer') =>
+    problemLabels(clan, values(steam, telegram)).includes('Steam ID или ссылка на профиль');
+  const clanTelegramProblem = (telegram) =>
+    problemLabels(clan, values('76561198000000000', telegram)).includes('Telegram');
+
+  assert.equal(clanSteamProblem('76561198000000000'), false);
+  assert.equal(clanSteamProblem('https://steamcommunity.com/id/ivan'), false);
+  assert.equal(clanSteamProblem('ivan_gamer'), false);
+  assert.equal(clanSteamProblem('!!'), true);
+
+  assert.equal(clanTelegramProblem('@ivan_gamer'), false);
+  assert.equal(clanTelegramProblem('t.me/ivan_gamer'), false);
+  assert.equal(clanTelegramProblem('@a'), true);
 });
 
 test('модератор с одними единицами отклоняется по опыту и мотивации', () => {

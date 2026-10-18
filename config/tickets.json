@@ -63,6 +63,26 @@
           "minLength": 20,
           "maxLength": 1000,
           "minWords": 3
+        },
+        {
+          "id": "steam",
+          "label": "Steam ID или ссылка на профиль",
+          "placeholder": "76561198… или steamcommunity.com/id/…",
+          "style": "short",
+          "required": true,
+          "maxLength": 200,
+          "pattern": "^(\\d{17}|https?://steamcommunity\\.com/\\S+|[A-Za-z0-9_-]{3,32})$",
+          "patternHint": "17 цифр Steam ID, ссылка на профиль steamcommunity.com или ник из 3–32 символов"
+        },
+        {
+          "id": "telegram",
+          "label": "Telegram",
+          "placeholder": "@username или t.me/username",
+          "style": "short",
+          "required": true,
+          "maxLength": 100,
+          "pattern": "^(@?[A-Za-z0-9_]{4,32}|https?://t\\.me/\\S+|t\\.me/\\S+)$",
+          "patternHint": "@username (от 4 символов) или ссылка t.me/…"
         }
       ]
     },

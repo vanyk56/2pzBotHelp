@@ -1,8 +1,11 @@
 import { readFileSync } from 'node:fs';
 import { ActionRowBuilder, ModalBuilder, TextInputBuilder, TextInputStyle } from 'discord.js';
 
-// Лимиты Discord: в модалке до 5 полей, подпись до 45 символов, заголовок до 45
-const MAX_FIELDS = 5;
+// Лимиты Discord: в одном окне модалки до 5 полей, подпись до 45 символов, заголовок до 45.
+// Если полей больше 5, анкета идёт в несколько окон (до двух): пользователь нажимает «Далее»
+const STEP_SIZE = 5;
+const MAX_STEPS = 2;
+const MAX_FIELDS = STEP_SIZE * MAX_STEPS;
 const MAX_LABEL = 45;
 const MAX_TITLE = 45;
 
@@ -13,7 +16,7 @@ function validateFields(type) {
     throw new Error(`Тип «${type.id}»: нет полей анкеты`);
   }
   if (type.fields.length > MAX_FIELDS) {
-    throw new Error(`Тип «${type.id}»: в анкете не больше ${MAX_FIELDS} полей (лимит Discord)`);
+    throw new Error(`Тип «${type.id}»: в анкете не больше ${MAX_FIELDS} полей (два окна по ${STEP_SIZE})`);
   }
 
   const ids = new Set();
@@ -55,8 +58,19 @@ export const ticketConfig = loadTicketConfig(new URL('../config/tickets.json', i
 export const ticketTypes = ticketConfig.types;
 export const findType = (id) => ticketTypes.find((type) => type.id === id) ?? null;
 
-export function buildFormModal(type) {
-  const rows = type.fields.map((field) => {
+// Сколько окон у анкеты и какие поля в окне step (с нуля)
+export const formStepCount = (type) => Math.ceil(type.fields.length / STEP_SIZE);
+export const formStepFields = (type, step) => type.fields.slice(step * STEP_SIZE, step * STEP_SIZE + STEP_SIZE);
+
+// customId модалки: ticket:form:<тип>:<номер окна>
+export function parseFormId(customId) {
+  const [typeId, step] = customId.slice(FORM_MODAL_PREFIX.length).split(':');
+  return { typeId, step: Number(step) };
+}
+
+export function buildFormModal(type, step = 0) {
+  const fields = formStepFields(type, step);
+  const rows = fields.map((field) => {
     const input = new TextInputBuilder()
       .setCustomId(field.id)
       .setLabel(field.label)
@@ -69,9 +83,11 @@ export function buildFormModal(type) {
     return new ActionRowBuilder().addComponents(input);
   });
 
+  const count = formStepCount(type);
+  const title = count > 1 ? `${type.title} (${step + 1}/${count})` : type.title;
   return new ModalBuilder()
-    .setCustomId(`${FORM_MODAL_PREFIX}${type.id}`)
-    .setTitle(type.title)
+    .setCustomId(`${FORM_MODAL_PREFIX}${type.id}:${step}`)
+    .setTitle(title)
     .addComponents(rows);
 }
 
@@ -101,6 +117,9 @@ function checkValue(field, value) {
   if (!value) return field.required === false ? null : 'поле не заполнено';
   if (field.minLength && value.length < field.minLength) {
     return `слишком короткий ответ, нужно минимум ${field.minLength} симв.`;
+  }
+  if (field.pattern && !new RegExp(field.pattern, 'i').test(value)) {
+    return field.patternHint ?? 'неверный формат';
   }
   if (field.requireDigit && !/\d/.test(value)) return 'укажите число';
   if (field.requireLink && !LINK_PATTERN.test(value)) return 'нужна ссылка, например https://…';

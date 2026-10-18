@@ -1,5 +1,6 @@
 import {
   ActionRowBuilder,
+  AttachmentBuilder,
   ButtonBuilder,
   ButtonStyle,
   ChannelType,
@@ -14,17 +15,22 @@ import {
   buildFormModal,
   findType,
   FORM_MODAL_PREFIX,
+  formStepCount,
+  formStepFields,
+  parseFormId,
   readAnswers,
   ticketConfig,
   validateAnswers,
 } from './form.js';
 import { buildMessages, greetingRequest, statusTitle } from './assistant.js';
+import { paginate, renderRulesPage, rulesConfig } from './rules-card.js';
 import { slugify, splitMessage } from './utils.js';
 
 // Кнопка открытия формы: ticket:open:<id типа>. Старый ticket:open означает клан (панели, опубликованные до перехода)
 const OPEN_PREFIX = 'ticket:open:';
 const LEGACY_OPEN_ID = 'ticket:open';
 const ACTION_PREFIX = 'ticket:act:';
+const NEXT_PREFIX = 'ticket:next:';
 const GREETING_FALLBACK = 'Спасибо за заявку! Модераторы скоро её рассмотрят, ответ появится в этом канале.';
 const REPLY_FALLBACK = 'Сейчас не могу ответить на ваше сообщение. Модераторы увидят его в этом канале.';
 // Модель пишет это слово, когда отвечать не нужно (small talk, не по теме)
@@ -32,6 +38,10 @@ const SKIP = '<SKIP>';
 // Если модератор писал в тикет за это время, ассистент молчит и не встревает в разговор
 const STAFF_SILENCE_MINUTES = 15;
 const DELETE_DELAY_MS = 10_000;
+// Сколько минут ждём второе окно анкеты, пока игрок его не открыл
+const FORM_TTL_MS = 15 * 60 * 1000;
+// Отметка, по которой находим старые сообщения с правилами, чтобы заменить их новыми
+const RULES_MARK = { public: '📜 Правила сервера', private: '📜 Правила клана' };
 
 // Кнопки модерации под заявкой (подписи как в старом боте 2pzbot)
 const STAFF_BUTTONS = [
@@ -54,6 +64,10 @@ const ACTIVE_PERMS = [
   PermissionFlagsBits.SendMessages,
   PermissionFlagsBits.ReadMessageHistory,
 ];
+
+// Ответы первого окна, пока игрок не открыл следующее: ключ «пользователь:тип»
+const pendingForms = new Map();
+const pendingKey = (userId, typeId) => `${userId}:${typeId}`;
 
 // Модалка причины отказа: модератор пишет её, бот отправляет игроку в ЛС
 export const REASON_MODAL_ID = 'ticket:reason';
@@ -90,6 +104,12 @@ function closedEmbed(note) {
     .setColor(0xed4245)
     .setTitle('🔒 Тикет закрыт')
     .setDescription(lines.filter(Boolean).join('\n\n'));
+}
+
+// Текст об ошибках анкеты
+function problemsText(problems) {
+  const lines = problems.map((p) => `• **${p.label}**: ${p.problem}`);
+  return `Заявка не отправлена, анкета заполнена некорректно. Исправьте поля и подайте заново:\n${lines.join('\n')}`;
 }
 
 export function createTicketBot({ client, db, ai, servers, contextMessages }) {
@@ -221,6 +241,37 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
     return replyEphemeral(interaction, `Панель опубликована в <#${channel.id}>.`);
   }
 
+  // Правила картинками: публичные и клановые, в выбранном канале, закрепляются. Старые правила заменяются
+  async function rulesCommand(interaction, server) {
+    if (!isStaff(interaction.member, server)) return replyEphemeral(interaction, 'Команда только для модерации.');
+
+    await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    const channel = interaction.options.getChannel('channel') ?? interaction.channel;
+
+    const pins = await channel.messages.fetchPins().catch(() => null);
+    const marks = Object.values(RULES_MARK);
+    for (const { message } of pins?.items ?? []) {
+      if (message.author.id === client.user.id && marks.includes(message.content)) {
+        await message.unpin().catch(() => {});
+        await message.delete().catch(() => {});
+      }
+    }
+
+    for (const key of ['public', 'private']) {
+      const set = rulesConfig[key];
+      const pages = paginate(set.sections);
+      const files = [];
+      for (let i = 0; i < pages.length; i += 1) {
+        const png = await renderRulesPage({ heading: set.heading, sections: pages[i], page: i + 1, pages: pages.length });
+        files.push(new AttachmentBuilder(png, { name: `${key}-${i + 1}.png` }));
+      }
+      const message = await channel.send({ content: RULES_MARK[key], files });
+      await message.pin().catch((error) => console.warn('Не удалось закрепить правила:', error.message));
+    }
+
+    return interaction.editReply(`Правила опубликованы и закреплены в <#${channel.id}>.`);
+  }
+
   async function openFormModal(interaction, type, server) {
     if (!type || !server.types.includes(type.id)) {
       return replyEphemeral(interaction, 'Этот тип тикета недоступен на этом сервере.');
@@ -229,25 +280,72 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
     if (active) {
       return replyEphemeral(interaction, `У вас уже есть открытая заявка: <#${active.channel_id}>`);
     }
-    return interaction.showModal(buildFormModal(type));
+    return interaction.showModal(buildFormModal(type, 0));
   }
 
-  async function submitForm(interaction, type, server) {
+  // Кнопка «Далее» после первого окна: открывает следующее окно анкеты (или то же окно, если в нём была ошибка)
+  async function openNextStep(interaction, type, step) {
+    const pending = pendingForms.get(pendingKey(interaction.user.id, type.id));
+    const ready = step === 0 || (pending && pending.step === step - 1 && pending.expires > Date.now());
+    if (!ready) return replyEphemeral(interaction, 'Анкета устарела, подайте заявку заново.');
+    return interaction.showModal(buildFormModal(type, step));
+  }
+
+  // Ответ после окна анкеты: следующий шаг или сообщение об ошибке с кнопкой повтора
+  function stepReply(interaction, type, step, content) {
+    const count = formStepCount(type);
+    const nextStep = step + 1 < count ? step + 1 : step;
+    const label = step + 1 < count ? 'Далее' : 'Заполнить заново';
+    const button = new ButtonBuilder()
+      .setCustomId(`${NEXT_PREFIX}${type.id}:${nextStep}`)
+      .setLabel(label)
+      .setStyle(ButtonStyle.Primary);
+    return interaction.reply({
+      content,
+      components: [new ActionRowBuilder().addComponents(button)],
+      flags: MessageFlags.Ephemeral,
+    });
+  }
+
+  async function submitForm(interaction, type, server, step) {
+    const stepType = { ...type, fields: formStepFields(type, step) };
+    const answers = readAnswers(interaction, stepType);
+    const problems = validateAnswers(answers, stepType);
+    const key = pendingKey(interaction.user.id, type.id);
+
+    if (problems.length > 0) {
+      // На первом окне повтор через панель, на следующих — кнопкой (ответы первого окна ещё хранятся)
+      if (step === 0) return replyEphemeral(interaction, problemsText(problems));
+      return stepReply(interaction, type, step, problemsText(problems));
+    }
+
+    let previous = [];
+    if (step > 0) {
+      const pending = pendingForms.get(key);
+      if (!pending || pending.step !== step - 1 || pending.expires < Date.now()) {
+        return replyEphemeral(interaction, 'Анкета устарела, подайте заявку заново.');
+      }
+      previous = pending.answers;
+    }
+
+    const all = [...previous, ...answers];
+    const count = formStepCount(type);
+    if (step < count - 1) {
+      pendingForms.set(key, { answers: all, step, expires: Date.now() + FORM_TTL_MS });
+      return stepReply(interaction, type, step, `Шаг ${step + 1} из ${count} сохранён. Нажмите «Далее», чтобы продолжить.`);
+    }
+
+    pendingForms.delete(key);
+    return createTicket(interaction, type, server, all);
+  }
+
+  async function createTicket(interaction, type, server, answers) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const { guild, user } = interaction;
     const active = await db.findActiveTicketByUser(user.id);
     if (active) {
       return interaction.editReply(`У вас уже есть открытая заявка: <#${active.channel_id}>`);
-    }
-
-    const answers = readAnswers(interaction, type);
-    const problems = validateAnswers(answers, type);
-    if (problems.length > 0) {
-      const lines = problems.map((p) => `• **${p.label}**: ${p.problem}`);
-      return interaction.editReply(
-        `Заявка не отправлена, анкета заполнена некорректно. Исправьте поля и подайте заново:\n${lines.join('\n')}`,
-      );
     }
 
     const channel = await guild.channels.create({
@@ -419,6 +517,7 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
     if (interaction.isChatInputCommand()) {
       if (interaction.commandName === 'panel') return panelCommand(interaction, server);
       if (interaction.commandName === 'close') return closeCommand(interaction, server);
+      if (interaction.commandName === 'rules') return rulesCommand(interaction, server);
       return null;
     }
 
@@ -427,6 +526,12 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
       if (id === LEGACY_OPEN_ID) return openFormModal(interaction, findType('clan'), server);
       if (id.startsWith(OPEN_PREFIX)) {
         return openFormModal(interaction, findType(id.slice(OPEN_PREFIX.length)), server);
+      }
+      if (id.startsWith(NEXT_PREFIX)) {
+        const [typeId, step] = id.slice(NEXT_PREFIX.length).split(':');
+        const type = findType(typeId);
+        if (!type || !server.types.includes(type.id)) return null;
+        return openNextStep(interaction, type, Number(step));
       }
       if (id.startsWith(ACTION_PREFIX)) {
         return staffAction(interaction, id.slice(ACTION_PREFIX.length), server);
@@ -438,9 +543,10 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
       return rejectWithReason(interaction, server);
     }
     if (interaction.isModalSubmit() && interaction.customId.startsWith(FORM_MODAL_PREFIX)) {
-      const type = findType(interaction.customId.slice(FORM_MODAL_PREFIX.length));
+      const { typeId, step } = parseFormId(interaction.customId);
+      const type = findType(typeId);
       if (!type || !server.types.includes(type.id)) return null;
-      return submitForm(interaction, type, server);
+      return submitForm(interaction, type, server, step);
     }
     return null;
   }
