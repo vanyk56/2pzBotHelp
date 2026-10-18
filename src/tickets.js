@@ -23,7 +23,7 @@ import {
   validateAnswers,
 } from './form.js';
 import { buildMessages, greetingRequest, statusTitle } from './assistant.js';
-import { paginate, renderRulesPage, rulesConfig } from './rules-card.js';
+import { renderRulesSet, rulesConfig } from './rules-card.js';
 import { slugify, splitMessage } from './utils.js';
 
 // Кнопка открытия формы: ticket:open:<id типа>. Старый ticket:open означает клан (панели, опубликованные до перехода)
@@ -42,6 +42,10 @@ const DELETE_DELAY_MS = 10_000;
 const FORM_TTL_MS = 15 * 60 * 1000;
 // Отметка, по которой находим старые сообщения с правилами, чтобы заменить их новыми
 const RULES_MARK = { public: '📜 Правила сервера', private: '📜 Правила клана' };
+// Лимит Discord: до 10 embed (и 10 файлов) в одном сообщении
+const RULES_PER_MESSAGE = 10;
+// Цвет полосы embed под фон Discord, чтобы карточки выглядели одним столбиком
+const RULES_COLOR = 0x2b2d31;
 
 // Кнопки модерации под заявкой (подписи как в старом боте 2pzbot)
 const STAFF_BUTTONS = [
@@ -258,15 +262,18 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
     }
 
     for (const key of ['public', 'private']) {
-      const set = rulesConfig[key];
-      const pages = paginate(set.sections);
-      const files = [];
-      for (let i = 0; i < pages.length; i += 1) {
-        const png = await renderRulesPage({ heading: set.heading, sections: pages[i], page: i + 1, pages: pages.length });
-        files.push(new AttachmentBuilder(png, { name: `${key}-${i + 1}.png` }));
+      const images = await renderRulesSet(key, rulesConfig[key]);
+      // Каждая карточка — отдельный embed: Discord ставит их одну под другой одинаковой ширины,
+      // а не мозаикой, как несколько картинок без embed
+      for (let i = 0; i < images.length; i += RULES_PER_MESSAGE) {
+        const group = images.slice(i, i + RULES_PER_MESSAGE);
+        const message = await channel.send({
+          content: RULES_MARK[key],
+          files: group.map(({ name, png }) => new AttachmentBuilder(png, { name })),
+          embeds: group.map(({ name }) => new EmbedBuilder().setColor(RULES_COLOR).setImage(`attachment://${name}`)),
+        });
+        await message.pin().catch((error) => console.warn('Не удалось закрепить правила:', error.message));
       }
-      const message = await channel.send({ content: RULES_MARK[key], files });
-      await message.pin().catch((error) => console.warn('Не удалось закрепить правила:', error.message));
     }
 
     return interaction.editReply(`Правила опубликованы и закреплены в <#${channel.id}>.`);

@@ -5,23 +5,34 @@ import { Resvg } from '@resvg/resvg-js';
 
 export const rulesConfig = JSON.parse(readFileSync(new URL('../config/rules.json', import.meta.url), 'utf8'));
 
-// Карточки правил в том же стиле, что баннер сбора. Ширина 1000, внутренний блок 904 (+ отступы 48)
+// Карточки правил: по одной на раздел плюс заголовок. Все карточки набора одного размера,
+// чтобы в Discord они шли ровным столбиком. satori считает padding сверх width, поэтому
+// внутренний блок = ширина − 2 × PAD.
 const WIDTH = 1000;
-const PAD = 48;
+const PAD = 56;
 const INNER = WIDTH - PAD * 2;
-const CARD_PAD_X = 26;
-const CARD_PAD_Y = 22;
-const CARD_INNER = INNER - CARD_PAD_X * 2;
-const BULLET_TEXT_WIDTH = CARD_INNER - 28;
-const CHARS_PER_LINE = 62;
-const BULLET_LINE = 34;
-const SECTIONS_PER_PAGE = 4;
+const BADGE = 96;
+const GAP = 32;
+const TEXT_WIDTH = INNER - BADGE - GAP;
+const DOT = 10;
+const DOT_GAP = 18;
+const BULLET_TEXT_WIDTH = TEXT_WIDTH - DOT - DOT_GAP;
+
+const TOP_LABEL = 44;
+const TITLE_SIZE = 38;
+const TITLE_LINE = 50;
+const BULLET_SIZE = 28;
+const BULLET_LINE = 40;
+const BULLET_GAP = 12;
+// Сколько символов помещается в строку (оценка с запасом, чтобы текст не упирался в край)
+const TITLE_CHARS = 30;
+const BULLET_CHARS = 42;
 
 const SANS = 'DejaVu Sans';
-const ACCENT = 'linear-gradient(90deg, #7c6cff 0%, #3ba3ff 100%)';
+const ACCENT = 'linear-gradient(135deg, #7c6cff 0%, #3ba3ff 100%)';
 const BACKGROUND = [
-  'radial-gradient(circle at 88% 6%, rgba(124, 108, 255, 0.38) 0%, rgba(124, 108, 255, 0) 40%)',
-  'radial-gradient(circle at 4% 100%, rgba(59, 163, 255, 0.25) 0%, rgba(59, 163, 255, 0) 36%)',
+  'radial-gradient(circle at 92% 0%, rgba(124, 108, 255, 0.40) 0%, rgba(124, 108, 255, 0) 45%)',
+  'radial-gradient(circle at 0% 100%, rgba(59, 163, 255, 0.24) 0%, rgba(59, 163, 255, 0) 40%)',
   'linear-gradient(135deg, #22194a 0%, #120e26 62%, #0b0917 100%)',
 ].join(', ');
 
@@ -35,68 +46,123 @@ const fonts = [font('DejaVuSans.ttf', 400), font('DejaVuSans-Bold.ttf', 700)];
 
 const box = (style, children = []) => ({ type: 'div', props: { style: { display: 'flex', ...style }, children } });
 
-// Высота карточки раздела по числу строк (оценка: текст переносится примерно по 62 символа)
-const bulletLines = (text) => Math.max(1, Math.ceil(text.length / CHARS_PER_LINE));
-const sectionHeight = (section) =>
-  2 * CARD_PAD_Y + 44 + section.bullets.reduce((sum, b) => sum + bulletLines(b) * BULLET_LINE + 10, 0) + 16;
+// «1. Общие правила» → «Общие правила»: номер и так стоит в значке слева
+export const cleanTitle = (title) => title.replace(/^\s*\d+[.)]\s*/, '');
 
-function pageHeight(sections) {
-  const header = 150;
-  return PAD + header + sections.reduce((sum, s) => sum + sectionHeight(s), 0) + PAD;
+const lineCount = (text, perLine) => Math.max(1, Math.ceil(text.length / perLine));
+
+function sectionTextHeight(section) {
+  const title = lineCount(cleanTitle(section.title), TITLE_CHARS) * TITLE_LINE;
+  const bullets = section.bullets.reduce((sum, b) => sum + lineCount(b, BULLET_CHARS) * BULLET_LINE + BULLET_GAP, 0);
+  return title + bullets;
 }
 
-// Разбивает разделы на страницы, чтобы в одном изображении было не больше SECTIONS_PER_PAGE разделов
-export function paginate(sections) {
-  const pages = [];
-  for (let i = 0; i < sections.length; i += SECTIONS_PER_PAGE) pages.push(sections.slice(i, i + SECTIONS_PER_PAGE));
-  return pages;
+// Высота всех карточек набора: по самому длинному разделу, чтобы карточки были одинаковыми
+export function cardHeight(sections) {
+  const header = 260;
+  const tallest = Math.max(...sections.map(sectionTextHeight));
+  return PAD * 2 + TOP_LABEL + Math.max(tallest, header);
 }
 
-// Одна страница правил: заголовок и карточки разделов. Возвращает PNG
-export async function renderRulesPage({ heading, sections, page, pages }) {
-  const height = pageHeight(sections);
-  const title = pages > 1 ? `${heading} · ${page}/${pages}` : heading;
+function plural(n, one, few, many) {
+  const mod10 = n % 10;
+  const mod100 = n % 100;
+  if (mod10 === 1 && mod100 !== 11) return one;
+  if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return few;
+  return many;
+}
 
-  const sectionCard = (section, index) =>
-    box(
-      {
-        flexDirection: 'column',
-        width: CARD_INNER,
-        padding: `${CARD_PAD_Y}px ${CARD_PAD_X}px`,
-        borderRadius: 18,
-        background: 'rgba(255,255,255,0.06)',
-        border: '1px solid rgba(255,255,255,0.10)',
-        marginTop: index === 0 ? 0 : 16,
-      },
-      [
-        box({ fontSize: 28, fontWeight: 700, color: '#ffffff' }, [section.title]),
-        ...section.bullets.map((bullet) =>
-          box({ marginTop: 10, alignItems: 'flex-start' }, [
-            box({ width: 8, height: 8, borderRadius: 4, background: '#7c6cff', marginTop: 10, marginRight: 20 }),
-            box({ width: BULLET_TEXT_WIDTH, fontSize: 23, lineHeight: 1.4, color: '#e7e4f5' }, [bullet]),
-          ]),
-        ),
-      ],
-    );
-
-  const tree = box({ width: WIDTH, height, background: BACKGROUND, fontFamily: SANS, color: '#ffffff' }, [
-    box({ flexDirection: 'column', width: INNER, height: height - PAD * 2, padding: PAD }, [
-      box({
-        background: ACCENT,
-        borderRadius: 999,
-        padding: '8px 22px',
-        fontSize: 20,
-        fontWeight: 700,
-        alignSelf: 'flex-start',
-      }, ['ПРАВИЛА']),
-      box({ fontSize: 52, fontWeight: 700, marginTop: 14, lineHeight: 1.1 }, [title]),
-      box({ width: 180, height: 4, background: ACCENT, borderRadius: 2, marginTop: 12, marginBottom: 30 }),
-      ...sections.map(sectionCard),
-    ]),
+const topLabel = (left, right) =>
+  box({ height: TOP_LABEL, justifyContent: 'space-between', alignItems: 'flex-start' }, [
+    box({ fontSize: 18, fontWeight: 700, letterSpacing: 3, color: '#a9a3cf' }, [left]),
+    box({ fontSize: 18, fontWeight: 700, letterSpacing: 3, color: '#a9a3cf' }, [right]),
   ]);
 
+const frame = (height, children) =>
+  box({ width: WIDTH, height, background: BACKGROUND, fontFamily: SANS, color: '#ffffff' }, [
+    box({ flexDirection: 'column', width: INNER, height: height - PAD * 2, padding: PAD }, children),
+  ]);
+
+async function toPng(tree, height) {
   const svg = await satori(tree, { width: WIDTH, height, fonts });
   return new Resvg(svg, { fitTo: { mode: 'width', value: WIDTH } }).render().asPng();
+}
+
+// Заголовок набора правил: та же карточка, крупное название и число разделов
+export async function renderRulesHeader({ heading, sectionCount, height }) {
+  const tree = frame(height, [
+    topLabel('2PZ', `${sectionCount} ${plural(sectionCount, 'РАЗДЕЛ', 'РАЗДЕЛА', 'РАЗДЕЛОВ')}`),
+    box({ flexDirection: 'column', flexGrow: 1, justifyContent: 'center' }, [
+      box({ background: ACCENT, borderRadius: 999, padding: '8px 24px', fontSize: 22, fontWeight: 700, alignSelf: 'flex-start' }, [
+        'ПРАВИЛА',
+      ]),
+      box({ fontSize: 76, fontWeight: 700, marginTop: 18, lineHeight: 1.1 }, [heading]),
+      box({ width: 220, height: 5, background: ACCENT, borderRadius: 3, marginTop: 18 }),
+      box({ fontSize: 26, color: '#b9b3d6', marginTop: 22 }, ['Прочитайте разделы ниже']),
+    ]),
+  ]);
+  return toPng(tree, height);
+}
+
+// Карточка одного раздела: номер в значке слева, справа название и пункты
+export async function renderRulesCard({ heading, section, index, total, height }) {
+  const number = String(index).padStart(2, '0');
+  const tree = frame(height, [
+    topLabel(heading.toUpperCase(), `${index} / ${total}`),
+    box({ flexGrow: 1, alignItems: 'center' }, [
+      box(
+        {
+          width: BADGE,
+          height: BADGE,
+          borderRadius: 26,
+          background: ACCENT,
+          alignItems: 'center',
+          justifyContent: 'center',
+          fontSize: 40,
+          fontWeight: 700,
+          flexShrink: 0,
+        },
+        [number],
+      ),
+      box({ width: GAP, flexShrink: 0 }),
+      box({ flexDirection: 'column', width: TEXT_WIDTH }, [
+        box({ fontSize: TITLE_SIZE, fontWeight: 700, lineHeight: TITLE_LINE / TITLE_SIZE }, [cleanTitle(section.title)]),
+        ...section.bullets.map((bullet) =>
+          box({ marginTop: BULLET_GAP, alignItems: 'flex-start' }, [
+            box({
+              width: DOT,
+              height: DOT,
+              borderRadius: DOT / 2,
+              background: '#8f84ff',
+              marginTop: (BULLET_LINE - DOT) / 2,
+              marginRight: DOT_GAP,
+              flexShrink: 0,
+            }),
+            box(
+              { width: BULLET_TEXT_WIDTH, fontSize: BULLET_SIZE, lineHeight: BULLET_LINE / BULLET_SIZE, color: '#e7e4f5' },
+              [bullet],
+            ),
+          ]),
+        ),
+      ]),
+    ]),
+  ]);
+  return toPng(tree, height);
+}
+
+// Весь набор: заголовок и карточки разделов одинакового размера. Возвращает [{ name, png }]
+export async function renderRulesSet(key, set) {
+  const height = cardHeight(set.sections);
+  const total = set.sections.length;
+  const images = [
+    { name: `${key}-00.png`, png: await renderRulesHeader({ heading: set.heading, sectionCount: total, height }) },
+  ];
+  for (let i = 0; i < total; i += 1) {
+    const index = i + 1;
+    const png = await renderRulesCard({ heading: set.heading, section: set.sections[i], index, total, height });
+    images.push({ name: `${key}-${String(index).padStart(2, '0')}.png`, png });
+  }
+  return images;
 }
 
 // Команда /rules: публикует правила (публичные и клановые) и закрепляет их в выбранном канале
