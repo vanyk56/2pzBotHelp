@@ -53,6 +53,23 @@ CREATE TABLE IF NOT EXISTS event_rsvps (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (event_id, user_id)
 );
+
+-- Профили принятых игроков: Steam ID, Telegram и привязка к Discord
+CREATE TABLE IF NOT EXISTS user_profiles (
+  id          BIGSERIAL PRIMARY KEY,
+  guild_id    TEXT        NOT NULL,
+  user_id     TEXT        NOT NULL,
+  username    TEXT        NOT NULL,
+  steam       TEXT,
+  telegram    TEXT,
+  ticket_id   BIGINT      REFERENCES tickets (id) ON DELETE SET NULL,
+  accepted_by TEXT,
+  created_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
+  CONSTRAINT user_profiles_guild_user_key UNIQUE (guild_id, user_id)
+);
+
+CREATE INDEX IF NOT EXISTS user_profiles_guild_idx ON user_profiles (guild_id);
 `;
 
 export function createDb(connectionString) {
@@ -161,6 +178,35 @@ export function createDb(connectionString) {
         [sinceUnix],
       );
       return rows;
+    },
+
+    async saveProfile({ guildId, userId, username, steam, telegram, ticketId = null, acceptedBy = null }) {
+      const { rows } = await pool.query(
+        `INSERT INTO user_profiles (guild_id, user_id, username, steam, telegram, ticket_id, accepted_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7)
+         ON CONFLICT (guild_id, user_id) DO UPDATE SET
+           username = EXCLUDED.username,
+           steam = COALESCE(EXCLUDED.steam, user_profiles.steam),
+           telegram = COALESCE(EXCLUDED.telegram, user_profiles.telegram),
+           ticket_id = COALESCE(EXCLUDED.ticket_id, user_profiles.ticket_id),
+           accepted_by = COALESCE(EXCLUDED.accepted_by, user_profiles.accepted_by),
+           updated_at = now()
+         RETURNING *`,
+        [guildId, userId, username, steam, telegram, ticketId, acceptedBy],
+      );
+      return rows[0];
+    },
+
+    async listProfiles(guildId) {
+      const { rows } = await pool.query(
+        `SELECT * FROM user_profiles WHERE guild_id = $1 ORDER BY id ASC`,
+        [guildId],
+      );
+      return rows;
+    },
+
+    async deleteProfile(guildId, userId) {
+      await pool.query('DELETE FROM user_profiles WHERE guild_id = $1 AND user_id = $2', [guildId, userId]);
     },
 
     async close() {

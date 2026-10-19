@@ -5,10 +5,12 @@ import { createAiClient } from './ai.js';
 import { createTicketBot } from './tickets.js';
 import { createEventBot, ensureEventEmojis, EVENT_COMMAND } from './events.js';
 import { RULES_COMMAND } from './rules-card.js';
+import { PROFILES_COMMAND } from './profiles.js';
 
 const COMMANDS = [
   { name: 'panel', description: 'Опубликовать и закрепить кнопки подачи заявок в этом канале' },
   { name: 'close', description: 'Закрыть тикет и удалить его канал' },
+  PROFILES_COMMAND,
   RULES_COMMAND,
 ];
 

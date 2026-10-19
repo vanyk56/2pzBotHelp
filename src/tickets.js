@@ -25,6 +25,12 @@ import {
 import { buildMessages, greetingRequest, statusTitle } from './assistant.js';
 import { renderRulesSet, rulesConfig } from './rules-card.js';
 import { slugify, splitMessage } from './utils.js';
+import {
+  extractProfileAnswers,
+  parseProfilesPageId,
+  PROFILES_PAGE_PREFIX,
+  renderProfilesMessage,
+} from './profiles.js';
 
 // Кнопка открытия формы: ticket:open:<id типа>. Старый ticket:open означает клан (панели, опубликованные до перехода)
 const OPEN_PREFIX = 'ticket:open:';
@@ -486,6 +492,31 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
     // Отказ требует причину: сначала модалка, закрытие в rejectWithReason
     if (action === 'reject') return interaction.showModal(buildReasonModal());
 
+    // Если заявка принята — сохраняем профиль игрока в базу данных (Steam и Telegram, если указаны)
+    if (action === 'accept') {
+      const answers = Array.isArray(ticket.answers)
+        ? ticket.answers
+        : typeof ticket.answers === 'string'
+          ? JSON.parse(ticket.answers)
+          : [];
+      const { steam, telegram } = extractProfileAnswers(answers);
+      if (steam || telegram) {
+        try {
+          await db.saveProfile({
+            guildId: ticket.guild_id || interaction.guildId,
+            userId: ticket.user_id,
+            username: ticket.username,
+            steam,
+            telegram,
+            ticketId: ticket.id,
+            acceptedBy: interaction.user.id,
+          });
+        } catch (error) {
+          console.error('Ошибка сохранения профиля игрока:', error);
+        }
+      }
+    }
+
     // Решения, после которых тикет закрывается: плашка и удаление канала
     const closing = CLOSING_DECISIONS[action];
     if (closing) {
@@ -517,6 +548,14 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
     return closeTicket(interaction, interaction.user.id);
   }
 
+  async function profilesCommand(interaction, server) {
+    if (!isStaff(interaction.member, server)) return replyEphemeral(interaction, 'Команда только для модерации.');
+
+    const profiles = await db.listProfiles(interaction.guildId);
+    const payload = renderProfilesMessage(profiles, 0, interaction.guild?.name);
+    return interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
+  }
+
   async function handleInteraction(interaction) {
     const server = serverByGuild.get(interaction.guildId);
     if (!server) return null;
@@ -525,6 +564,7 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
       if (interaction.commandName === 'panel') return panelCommand(interaction, server);
       if (interaction.commandName === 'close') return closeCommand(interaction, server);
       if (interaction.commandName === 'rules') return rulesCommand(interaction, server);
+      if (interaction.commandName === 'profiles') return profilesCommand(interaction, server);
       return null;
     }
 
@@ -542,6 +582,13 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
       }
       if (id.startsWith(ACTION_PREFIX)) {
         return staffAction(interaction, id.slice(ACTION_PREFIX.length), server);
+      }
+      if (id.startsWith(PROFILES_PAGE_PREFIX)) {
+        if (!isStaff(interaction.member, server)) return replyEphemeral(interaction, 'Команда только для модерации.');
+        const page = parseProfilesPageId(id);
+        const profiles = await db.listProfiles(interaction.guildId);
+        const payload = renderProfilesMessage(profiles, page, interaction.guild?.name);
+        return interaction.update(payload);
       }
       return null;
     }
