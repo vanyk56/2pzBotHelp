@@ -47,6 +47,8 @@ export function loadServers(url) {
       ticketCategoryId: snowflake(server.ticketCategoryId, 'ticketCategoryId'),
       staffRoleIds,
       voiceChannelId: server.voiceChannelId ? snowflake(server.voiceChannelId, 'voiceChannelId') : null,
+      // Роль, которая выдаётся игроку при принятии тикета («Принять»)
+      acceptedRoleId: server.acceptedRoleId ? snowflake(server.acceptedRoleId, 'acceptedRoleId') : null,
       // Команда /event со сборами на вайп (только там, где включено)
       events: server.events === true,
       // Канал, куда ведут игроков, которые опаздывают или не будут (необязательно)

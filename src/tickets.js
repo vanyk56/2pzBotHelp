@@ -514,6 +514,20 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
         } catch (error) {
           console.error('Ошибка сохранения профиля игрока:', error);
         }
+      }
+
+      // Выдаём роль принятого игрока, если она настроена для сервера
+      if (server.acceptedRoleId) {
+        try {
+          const member = await interaction.guild?.members.fetch(ticket.user_id).catch(() => null);
+          if (member) {
+            await member.roles.add(server.acceptedRoleId).catch((err) => {
+              console.error(`Не удалось выдать роль ${server.acceptedRoleId} игроку ${ticket.user_id}:`, err.message);
+            });
+          }
+        } catch (error) {
+          console.error(`Ошибка при выдаче роли ${server.acceptedRoleId}:`, error.message);
+        }
       }
     }
 

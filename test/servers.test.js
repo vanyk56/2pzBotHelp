@@ -25,10 +25,11 @@ const validServer = (overrides = {}) => ({
 });
 
 test('корректный сервер загружается с нормализованными ID', () => {
-  const [server] = loadServers(writeServers([validServer()]));
+  const [server] = loadServers(writeServers([validServer({ acceptedRoleId: '1559166479436611624' })]));
   assert.equal(server.guildId, '1424466632511852654');
   assert.deepEqual(server.types, ['clan']);
   assert.equal(server.voiceChannelId, null);
+  assert.equal(server.acceptedRoleId, '1559166479436611624');
 });
 
 test('незаполненный REPLACE-плейсхолдер не даёт запуститься', () => {
