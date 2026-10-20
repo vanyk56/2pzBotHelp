@@ -6,13 +6,19 @@ import {
   formatTelegram,
   parseProfilesPageId,
   PROFILES_COMMAND,
+  PROFILES_DELETE_PROMPT,
+  PROFILES_DO_DELETE,
   PROFILES_PAGE_PREFIX,
+  renderDeleteSelectMessage,
   renderProfilesMessage,
 } from '../src/profiles.js';
 
-test('команда /profiles имеет корректное имя и описание', () => {
+test('команда /profiles имеет корректное имя, описание и опцию удаления', () => {
   assert.equal(PROFILES_COMMAND.name, 'profiles');
   assert.ok(PROFILES_COMMAND.description);
+  const deleteOpt = PROFILES_COMMAND.options.find((o) => o.name === 'delete_user');
+  assert.ok(deleteOpt);
+  assert.equal(deleteOpt.required, false);
 });
 
 test('formatSteam корректно форматирует 17-значный Steam ID, ссылки и ники', () => {
@@ -74,7 +80,7 @@ test('renderProfilesMessage для пустого списка возвраща�
   assert.equal(result.components.length, 0);
 });
 
-test('renderProfilesMessage с игроками строит поля и кнопки пагинации', () => {
+test('renderProfilesMessage с игроками строит поля и кнопки пагинации + удаление', () => {
   const sampleProfiles = Array.from({ length: 12 }, (_, i) => ({
     id: i + 1,
     guild_id: '123',
@@ -92,9 +98,10 @@ test('renderProfilesMessage с игроками строит поля и кно�
   assert.ok(embed0.footer.text.includes('Страница 1 из 3 · Всего игроков: 12'));
 
   const row0 = page0.components[0].toJSON();
-  assert.equal(row0.components.length, 3); // Назад, Вперёд, Обновить
+  assert.equal(row0.components.length, 4); // Назад, Вперёд, Обновить, Удалить
   assert.equal(row0.components[0].disabled, true); // Кнопка «Назад» отключена на первой странице
   assert.equal(row0.components[1].disabled, false); // Кнопка «Вперёд» включена
+  assert.equal(row0.components[3].custom_id, PROFILES_DELETE_PROMPT); // Кнопка «Удалить»
 
   // Последняя страница (2)
   const page2 = renderProfilesMessage(sampleProfiles, 2, '2pz');
@@ -103,4 +110,21 @@ test('renderProfilesMessage с игроками строит поля и кно�
   const row2 = page2.components[0].toJSON();
   assert.equal(row2.components[0].disabled, false); // Кнопка «Назад» активна
   assert.equal(row2.components[1].disabled, true); // Кнопка «Вперёд» отключена на последней странице
+});
+
+test('renderDeleteSelectMessage строит выпадающее меню с опциями игроков', () => {
+  const sampleProfiles = [
+    { id: 1, user_id: 'user_1', username: 'Player_1', steam: '76561198000000000', telegram: '@p1' },
+    { id: 2, user_id: 'user_2', username: 'Player_2', steam: '76561198000000001', telegram: '@p2' },
+  ];
+
+  const result = renderDeleteSelectMessage(sampleProfiles, '2pz');
+  assert.equal(result.embeds.length, 1);
+  assert.equal(result.embeds[0].toJSON().title, '🗑️ Удаление профиля игрока · 2pz');
+
+  assert.equal(result.components.length, 2);
+  const selectMenu = result.components[0].toJSON().components[0];
+  assert.equal(selectMenu.custom_id, PROFILES_DO_DELETE);
+  assert.equal(selectMenu.options.length, 2);
+  assert.equal(selectMenu.options[0].value, 'user_1');
 });

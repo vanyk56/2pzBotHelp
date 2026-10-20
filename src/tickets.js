@@ -28,7 +28,10 @@ import { slugify, splitMessage } from './utils.js';
 import {
   extractProfileAnswers,
   parseProfilesPageId,
+  PROFILES_DELETE_PROMPT,
+  PROFILES_DO_DELETE,
   PROFILES_PAGE_PREFIX,
+  renderDeleteSelectMessage,
   renderProfilesMessage,
 } from './profiles.js';
 
@@ -582,6 +585,15 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
   async function profilesCommand(interaction, server) {
     if (!isStaff(interaction.member, server)) return replyEphemeral(interaction, 'Команда только для модерации.');
 
+    const deleteUser = interaction.options.getUser('delete_user');
+    if (deleteUser) {
+      await db.deleteProfile(interaction.guildId, deleteUser.id);
+      return interaction.reply({
+        content: `🗑️ Профиль игрока <@${deleteUser.id}> (${deleteUser.username}) успешно удалён из базы данных.`,
+        flags: MessageFlags.Ephemeral,
+      });
+    }
+
     const profiles = await db.listProfiles(interaction.guildId);
     const payload = renderProfilesMessage(profiles, 0, interaction.guild?.name);
     return interaction.reply({ ...payload, flags: MessageFlags.Ephemeral });
@@ -619,9 +631,27 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
         const page = parseProfilesPageId(id);
         const profiles = await db.listProfiles(interaction.guildId);
         const payload = renderProfilesMessage(profiles, page, interaction.guild?.name);
-        return interaction.update(payload);
+        return interaction.update({ content: null, ...payload });
+      }
+      if (id === PROFILES_DELETE_PROMPT) {
+        if (!isStaff(interaction.member, server)) return replyEphemeral(interaction, 'Команда только для модерации.');
+        const profiles = await db.listProfiles(interaction.guildId);
+        const payload = renderDeleteSelectMessage(profiles, interaction.guild?.name);
+        return interaction.update({ content: null, ...payload });
       }
       return null;
+    }
+
+    if (interaction.isStringSelectMenu() && interaction.customId === PROFILES_DO_DELETE) {
+      if (!isStaff(interaction.member, server)) return replyEphemeral(interaction, 'Команда только для модерации.');
+      const userId = interaction.values[0];
+      await db.deleteProfile(interaction.guildId, userId);
+      const profiles = await db.listProfiles(interaction.guildId);
+      const payload = renderProfilesMessage(profiles, 0, interaction.guild?.name);
+      return interaction.update({
+        content: `✅ Профиль игрока <@${userId}> успешно удалён!`,
+        ...payload,
+      });
     }
 
     if (interaction.isModalSubmit() && interaction.customId === REASON_MODAL_ID) {

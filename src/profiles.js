@@ -1,12 +1,29 @@
-import { ActionRowBuilder, ButtonBuilder, ButtonStyle, EmbedBuilder } from 'discord.js';
+import {
+  ActionRowBuilder,
+  ApplicationCommandOptionType,
+  ButtonBuilder,
+  ButtonStyle,
+  EmbedBuilder,
+  StringSelectMenuBuilder,
+} from 'discord.js';
 
 export const PROFILES_COMMAND = {
   name: 'profiles',
-  description: 'Список принятых игроков (Steam ID и Telegram)',
+  description: 'Список принятых игроков (Steam ID и Telegram) и удаление профилей',
+  options: [
+    {
+      name: 'delete_user',
+      description: 'Удалить профиль выбранного игрока (оставьте пустым для просмотра списка)',
+      type: ApplicationCommandOptionType.User,
+      required: false,
+    },
+  ],
 };
 
 export const PROFILES_PAGE_PREFIX = 'profiles:page:';
 export const PROFILES_PAGE_SIZE = 5;
+export const PROFILES_DELETE_PROMPT = 'profiles:delete_prompt';
+export const PROFILES_DO_DELETE = 'profiles:do_delete';
 
 export function parseProfilesPageId(customId) {
   const pageStr = customId.slice(PROFILES_PAGE_PREFIX.length);
@@ -133,8 +150,47 @@ export function renderProfilesMessage(profiles, page = 0, guildName = '') {
       .setStyle(ButtonStyle.Secondary),
   );
 
+  buttons.push(
+    new ButtonBuilder()
+      .setCustomId(PROFILES_DELETE_PROMPT)
+      .setLabel('Удалить')
+      .setStyle(ButtonStyle.Danger)
+      .setEmoji('🗑️'),
+  );
+
   return {
     embeds: [embed],
     components: [new ActionRowBuilder().addComponents(buttons)],
+  };
+}
+
+export function renderDeleteSelectMessage(profiles, guildName = '') {
+  const embed = new EmbedBuilder()
+    .setColor(0xed4245)
+    .setTitle(`🗑️ Удаление профиля игрока${guildName ? ` · ${guildName}` : ''}`)
+    .setDescription('Выберите игрока из меню ниже, чтобы удалить его профиль из базы данных:');
+
+  const options = profiles.slice(0, 25).map((p, i) => ({
+    label: `${i + 1}. ${p.username}`.slice(0, 100),
+    value: p.user_id,
+    description: `Steam: ${p.steam || '—'} | TG: ${p.telegram || '—'}`.slice(0, 100),
+  }));
+
+  const select = new StringSelectMenuBuilder()
+    .setCustomId(PROFILES_DO_DELETE)
+    .setPlaceholder('Выберите игрока для удаления...')
+    .addOptions(options);
+
+  const backButton = new ButtonBuilder()
+    .setCustomId(`${PROFILES_PAGE_PREFIX}0`)
+    .setLabel('⬅️ Отмена и назад к списку')
+    .setStyle(ButtonStyle.Secondary);
+
+  return {
+    embeds: [embed],
+    components: [
+      new ActionRowBuilder().addComponents(select),
+      new ActionRowBuilder().addComponents(backButton),
+    ],
   };
 }
