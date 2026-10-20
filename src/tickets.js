@@ -517,16 +517,32 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
       }
 
       // Выдаём роль принятого игрока, если она настроена для сервера
+      let roleNote = '';
       if (server.acceptedRoleId) {
         try {
-          const member = await interaction.guild?.members.fetch(ticket.user_id).catch(() => null);
-          if (member) {
-            await member.roles.add(server.acceptedRoleId).catch((err) => {
-              console.error(`Не удалось выдать роль ${server.acceptedRoleId} игроку ${ticket.user_id}:`, err.message);
-            });
+          const targetGuild =
+            interaction.guild?.id === server.guildId
+              ? interaction.guild
+              : await client.guilds.fetch(server.guildId).catch(() => null);
+
+          if (!targetGuild) {
+            roleNote = `⚠️ Не удалось найти сервер (ID ${server.guildId}) для выдачи роли.`;
+          } else {
+            const member = await targetGuild.members.fetch(ticket.user_id).catch(() => null);
+            if (!member) {
+              roleNote = `⚠️ Игрок <@${ticket.user_id}> не найден на сервере ${targetGuild.name}.`;
+            } else {
+              await member.roles.add(server.acceptedRoleId);
+              roleNote = `🎉 Роль <@&${server.acceptedRoleId}> успешно выдана!`;
+            }
           }
         } catch (error) {
-          console.error(`Ошибка при выдаче роли ${server.acceptedRoleId}:`, error.message);
+          console.error(`Ошибка при выдаче роли ${server.acceptedRoleId}:`, error);
+          if (error.code === 50013) {
+            roleNote = `⚠️ Не удалось выдать роль <@&${server.acceptedRoleId}>: у бота нет права «Управление ролями» (Manage Roles) или роль бота в настройках сервера стоит ниже роли <@&${server.acceptedRoleId}> в списке ролей сервера.`;
+          } else {
+            roleNote = `⚠️ Ошибка выдачи роли <@&${server.acceptedRoleId}>: ${error.message}`;
+          }
         }
       }
     }
@@ -534,11 +550,12 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
     // Решения, после которых тикет закрывается: плашка и удаление канала
     const closing = CLOSING_DECISIONS[action];
     if (closing) {
+      const finalNote = [closing.note(ticket.user_id), roleNote].filter(Boolean).join('\n\n');
       await db.addMessage(ticket.id, {
         role: 'system',
-        content: `Заявка ${closing.verdict} (решение модератора ${interaction.user.username}), канал закрыт`,
+        content: `Заявка ${closing.verdict} (решение модератора ${interaction.user.username}), канал закрыт. ${roleNote}`,
       });
-      return closeTicket(interaction, interaction.user.id, closing.note(ticket.user_id));
+      return closeTicket(interaction, interaction.user.id, finalNote);
     }
 
     await db.setStatus(ticket.channel_id, button.status, interaction.user.id);
