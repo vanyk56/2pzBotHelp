@@ -1,11 +1,32 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { buildStreamAlertPayload, STREAM_COMMANDS } from '../src/streams.js';
+import {
+  buildStreamAlertPayload,
+  extractTwitchLogin,
+  STREAM_COMMAND,
+  STREAM_COMMANDS,
+} from '../src/streams.js';
 
-test('команды стримов зарегистрированы', () => {
-  const names = STREAM_COMMANDS.map((c) => c.name);
-  assert.ok(names.includes('stream-check'));
-  assert.ok(names.includes('stream-test'));
+test('команда /stream и подкоманды зарегистрированы', () => {
+  assert.equal(STREAM_COMMAND.name, 'stream');
+  const subs = STREAM_COMMAND.options.map((o) => o.name);
+  assert.ok(subs.includes('add'));
+  assert.ok(subs.includes('remove'));
+  assert.ok(subs.includes('list'));
+  assert.ok(subs.includes('set-channel'));
+  assert.ok(subs.includes('remove-channel'));
+  assert.ok(subs.includes('test'));
+  assert.ok(subs.includes('check'));
+});
+
+test('extractTwitchLogin корректно разбирает ссылки, логины и @', () => {
+  assert.equal(extractTwitchLogin('chotki_mops'), 'chotki_mops');
+  assert.equal(extractTwitchLogin('@chotki_mops'), 'chotki_mops');
+  assert.equal(extractTwitchLogin('https://www.twitch.tv/chotki_mops'), 'chotki_mops');
+  assert.equal(extractTwitchLogin('twitch.tv/chotki_mops'), 'chotki_mops');
+  assert.equal(extractTwitchLogin('https://twitch.tv/Shroud'), 'shroud');
+  assert.equal(extractTwitchLogin(''), null);
+  assert.equal(extractTwitchLogin(null), null);
 });
 
 test('buildStreamAlertPayload формирует сообщение, embed и кнопку в стиле 2pz', () => {
