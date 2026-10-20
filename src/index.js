@@ -6,12 +6,14 @@ import { createTicketBot } from './tickets.js';
 import { createEventBot, ensureEventEmojis, EVENT_COMMAND } from './events.js';
 import { RULES_COMMAND } from './rules-card.js';
 import { PROFILES_COMMAND } from './profiles.js';
+import { createStreamAlerts, STREAM_COMMANDS } from './streams.js';
 
 const COMMANDS = [
   { name: 'panel', description: 'Опубликовать и закрепить кнопки подачи заявок в этом канале' },
   { name: 'close', description: 'Закрыть тикет и удалить его канал' },
   PROFILES_COMMAND,
   RULES_COMMAND,
+  ...STREAM_COMMANDS,
 ];
 
 const db = createDb(config.database.url);
@@ -28,6 +30,7 @@ const bot = createTicketBot({
   contextMessages: config.ai.contextMessages,
 });
 const events = createEventBot({ db, servers: config.discord.servers, client });
+const streams = createStreamAlerts({ client, db, servers: config.discord.servers });
 const HOUR_MS = 60 * 60 * 1000;
 let refreshTimer = null;
 
@@ -53,11 +56,15 @@ client.once(Events.ClientReady, async (readyClient) => {
   refresh();
   refreshTimer = setInterval(refresh, HOUR_MS);
 
+  // Запуск мониторинга стримов Twitch
+  streams.start();
+
   console.log(`Бот ${readyClient.user.tag} запущен`);
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
+    if (await streams.handleInteraction(interaction)) return;
     if (await events.handleInteraction(interaction)) return;
     await bot.handleInteraction(interaction);
   } catch (error) {
@@ -74,6 +81,7 @@ client.on(Events.MessageCreate, (message) => {
 
 async function shutdown() {
   clearInterval(refreshTimer);
+  streams.stop();
   await client.destroy();
   await db.close();
   process.exit(0);

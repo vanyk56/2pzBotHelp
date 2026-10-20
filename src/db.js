@@ -70,6 +70,13 @@ CREATE TABLE IF NOT EXISTS user_profiles (
 );
 
 CREATE INDEX IF NOT EXISTS user_profiles_guild_idx ON user_profiles (guild_id);
+
+-- Оповещения о стримах: последний ID стрима, чтобы не дублировать оповещения
+CREATE TABLE IF NOT EXISTS stream_alerts (
+  streamer_login TEXT PRIMARY KEY,
+  last_stream_id TEXT NOT NULL,
+  notified_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `;
 
 export function createDb(connectionString) {
@@ -207,6 +214,25 @@ export function createDb(connectionString) {
 
     async deleteProfile(guildId, userId) {
       await pool.query('DELETE FROM user_profiles WHERE guild_id = $1 AND user_id = $2', [guildId, userId]);
+    },
+
+    async getLastStreamAlert(login) {
+      const { rows } = await pool.query(
+        'SELECT last_stream_id FROM stream_alerts WHERE streamer_login = $1',
+        [login],
+      );
+      return rows[0]?.last_stream_id ?? null;
+    },
+
+    async setLastStreamAlert(login, streamId) {
+      await pool.query(
+        `INSERT INTO stream_alerts (streamer_login, last_stream_id, notified_at)
+         VALUES ($1, $2, now())
+         ON CONFLICT (streamer_login) DO UPDATE SET
+           last_stream_id = EXCLUDED.last_stream_id,
+           notified_at = now()`,
+        [login, streamId],
+      );
     },
 
     async close() {

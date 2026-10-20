@@ -51,6 +51,12 @@ export function loadServers(url) {
       events: server.events === true,
       // Канал, куда ведут игроков, которые опаздывают или не будут (необязательно)
       rsvpChannelId: server.rsvpChannelId ? snowflake(server.rsvpChannelId, 'rsvpChannelId') : null,
+      // Оповещения о стримах Twitch (канал # стримы)
+      streamChannelId: server.streamChannelId ? snowflake(server.streamChannelId, 'streamChannelId') : null,
+      streamers: Array.isArray(server.streamers)
+        ? server.streamers.map((s) => String(s).toLowerCase().trim())
+        : ['chotki_mops'],
+      streamRolePing: server.streamRolePing ? String(server.streamRolePing) : null,
     };
   });
 }

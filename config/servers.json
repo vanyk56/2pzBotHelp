@@ -13,7 +13,10 @@
         "1559166190600060978",
         "1424476290513113169"
       ],
-      "voiceChannelId": null
+      "voiceChannelId": null,
+      "streamChannelId": null,
+      "streamers": ["chotki_mops"],
+      "streamRolePing": null
     },
     {
       "name": "Сервер 2",
