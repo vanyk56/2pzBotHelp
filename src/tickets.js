@@ -34,6 +34,7 @@ import {
   renderDeleteSelectMessage,
   renderProfilesMessage,
 } from './profiles.js';
+import { sendTicketLog } from './ticket-logs.js';
 
 // Кнопка открытия формы: ticket:open:<id типа>. Старый ticket:open означает клан (панели, опубликованные до перехода)
 const OPEN_PREFIX = 'ticket:open:';
@@ -107,10 +108,12 @@ export function addressesBot(text, botId) {
 }
 
 // Плашка при закрытии тикета; note — необязательная первая строка (например, решение модератора)
-function closedEmbed(note) {
+function closedEmbed(note, isThread = false) {
   const lines = [
     note,
-    'Канал и история сообщений будут удалены через 10 секунд.',
+    isThread
+      ? 'Ветка тикета будет заблокирована и сохранена в архиве через 10 секунд.'
+      : 'Канал и история сообщений будут удалены через 10 секунд.',
     'Спасибо за обращение! Если вопрос возникнет снова, создайте новый тикет.',
   ];
   return new EmbedBuilder()
@@ -272,8 +275,6 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
 
     for (const key of ['public', 'private']) {
       const images = await renderRulesSet(key, rulesConfig[key]);
-      // Каждая карточка — отдельный embed: Discord ставит их одну под другой одинаковой ширины,
-      // а не мозаикой, как несколько картинок без embed
       for (let i = 0; i < images.length; i += RULES_PER_MESSAGE) {
         const group = images.slice(i, i + RULES_PER_MESSAGE);
         const message = await channel.send({
@@ -330,7 +331,6 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
     const key = pendingKey(interaction.user.id, type.id);
 
     if (problems.length > 0) {
-      // На первом окне повтор через панель, на следующих — кнопкой (ответы первого окна ещё хранятся)
       if (step === 0) return replyEphemeral(interaction, problemsText(problems));
       return stepReply(interaction, type, step, problemsText(problems));
     }
@@ -364,29 +364,57 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
       return interaction.editReply(`У вас уже есть открытая заявка: <#${active.channel_id}>`);
     }
 
-    const channel = await guild.channels.create({
-      name: `${type.channelPrefix}-${slugify(user.username, user.id)}`,
-      type: ChannelType.GuildText,
-      parent: server.ticketCategoryId,
-      topic: `${type.name} · ${user.id}`,
-      permissionOverwrites: [
-        { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
-        { id: user.id, allow: ACTIVE_PERMS },
-        ...server.staffRoleIds.map((id) => ({
-          id,
-          allow: [...ACTIVE_PERMS, PermissionFlagsBits.ManageMessages],
-        })),
-        {
-          id: client.user.id,
-          allow: [
-            ...ACTIVE_PERMS,
-            PermissionFlagsBits.ManageChannels,
-            PermissionFlagsBits.ManageMessages,
-            PermissionFlagsBits.EmbedLinks,
-          ],
-        },
-      ],
-    });
+    let channel = null;
+    const threadName = `${type.channelPrefix || 'тикет'}-${slugify(user.username, user.id)}`;
+
+    // 1. Создаём приватную ветку в канале панели заявок (как на скриншоте)
+    try {
+      const panelChannel =
+        interaction.channel ??
+        (server.panelChannelId ? await guild.channels.fetch(server.panelChannelId).catch(() => null) : null);
+
+      if (panelChannel && typeof panelChannel.threads?.create === 'function') {
+        channel = await panelChannel.threads.create({
+          name: threadName,
+          type: ChannelType.PrivateThread,
+          autoArchiveDuration: 10080,
+          invitable: false,
+          reason: `Тикет ${type.name} для ${user.username}`,
+        });
+        await channel.members.add(user.id).catch((err) =>
+          console.warn('Не удалось добавить игрока в ветку:', err.message),
+        );
+      }
+    } catch (threadError) {
+      console.warn('Не удалось создать приватную ветку тикета, пробуем создать канал:', threadError.message);
+    }
+
+    // 2. Фоллбэк: если создать ветку не удалось, создаём текстовый канал в категории
+    if (!channel) {
+      channel = await guild.channels.create({
+        name: threadName,
+        type: ChannelType.GuildText,
+        parent: server.ticketCategoryId,
+        topic: `${type.name} · ${user.id}`,
+        permissionOverwrites: [
+          { id: guild.roles.everyone.id, deny: [PermissionFlagsBits.ViewChannel] },
+          { id: user.id, allow: ACTIVE_PERMS },
+          ...server.staffRoleIds.map((id) => ({
+            id,
+            allow: [...ACTIVE_PERMS, PermissionFlagsBits.ManageMessages],
+          })),
+          {
+            id: client.user.id,
+            allow: [
+              ...ACTIVE_PERMS,
+              PermissionFlagsBits.ManageChannels,
+              PermissionFlagsBits.ManageMessages,
+              PermissionFlagsBits.EmbedLinks,
+            ],
+          },
+        ],
+      });
+    }
 
     let ticket;
     try {
@@ -399,7 +427,6 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
         answers,
       });
     } catch (error) {
-      // Например, гонка двух отправок: частичный индекс не даст создать вторую заявку
       await channel.delete('Заявка не сохранена').catch(() => {});
       throw error;
     }
@@ -407,21 +434,44 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
     await postApplication(channel, ticket, type, server);
     await interaction.editReply(`Заявка создана: <#${channel.id}>`);
 
+    // Отправляем лог в канал тикет-логов
+    await sendTicketLog({
+      guild,
+      server,
+      client,
+      action: 'created',
+      ticket,
+      type,
+      answers,
+      channel,
+    }).catch((err) => console.warn('Не удалось отправить лог создания тикета:', err.message));
+
     enqueue(channel.id, () =>
       respond(channel, { extra: [{ role: 'system', content: greetingRequest(type) }], fallback: GREETING_FALLBACK }),
     );
   }
 
-  // Закрывает заявку (освобождает слот у игрока), показывает плашку и удаляет канал
+  // Закрывает заявку (освобождает слот у игрока), показывает плашку и блокирует/архивирует ветку или удаляет канал
   async function closeTicket(interaction, decidedBy, note) {
     await db.setStatus(interaction.channelId, 'closed', decidedBy);
-    const payload = { embeds: [closedEmbed(note)] };
+    const isThread = Boolean(interaction.channel?.isThread?.());
+    const payload = { embeds: [closedEmbed(note, isThread)] };
     if (interaction.deferred) await interaction.editReply(payload);
     else await interaction.reply(payload);
-    setTimeout(() => {
-      interaction.channel
-        ?.delete('Тикет закрыт')
-        .catch((error) => console.error('Не удалось удалить канал:', error));
+
+    setTimeout(async () => {
+      try {
+        if (interaction.channel?.isThread?.()) {
+          await interaction.channel.setLocked(true, 'Тикет закрыт').catch(() => {});
+          await interaction.channel.setArchived(true, 'Тикет закрыт').catch(() => {});
+        } else {
+          await interaction.channel
+            ?.delete('Тикет закрыт')
+            .catch((error) => console.error('Не удалось удалить канал:', error));
+        }
+      } catch (error) {
+        console.error('Ошибка при архивации/удалении канала тикета:', error);
+      }
     }, DELETE_DELAY_MS);
   }
 
@@ -473,6 +523,20 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
       content: `Заявка отклонена (решение модератора ${interaction.user.username}). Причина: ${reason}`,
     });
 
+    // Отправляем лог отклонения в канал логов
+    await sendTicketLog({
+      guild: interaction.guild,
+      server,
+      client,
+      action: 'rejected',
+      ticket,
+      type: findType(ticket.ticket_type),
+      answers: ticket.answers,
+      decidedBy: interaction.user.id,
+      reason,
+      channel: interaction.channel,
+    }).catch((err) => console.warn('Не удалось отправить лог отклонения тикета:', err.message));
+
     const note = [
       `❌ Заявка **отклонена**.`,
       `**Причина:** ${reason}`,
@@ -495,15 +559,17 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
     // Отказ требует причину: сначала модалка, закрытие в rejectWithReason
     if (action === 'reject') return interaction.showModal(buildReasonModal());
 
-    // Если заявка принята — сохраняем профиль игрока в базу данных (Steam и Telegram, если указаны)
+    let roleNote = '';
+
+    // Если заявка принята — сохраняем профиль игрока в базу данных (Steam, Telegram, Имя, Часы)
     if (action === 'accept') {
       const answers = Array.isArray(ticket.answers)
         ? ticket.answers
         : typeof ticket.answers === 'string'
           ? JSON.parse(ticket.answers)
           : [];
-      const { steam, telegram } = extractProfileAnswers(answers);
-      if (steam || telegram) {
+      const { steam, telegram, realName, hours } = extractProfileAnswers(answers);
+      if (steam || telegram || realName) {
         try {
           await db.saveProfile({
             guildId: ticket.guild_id || interaction.guildId,
@@ -511,16 +577,17 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
             username: ticket.username,
             steam,
             telegram,
+            realName,
+            hours,
             ticketId: ticket.id,
             acceptedBy: interaction.user.id,
           });
         } catch (error) {
           console.error('Ошибка сохранения профиля игрока:', error);
         }
-      }
+      }
 
       // Выдаём роль принятого игрока, если она настроена для сервера
-      let roleNote = '';
       if (server.acceptedRoleId) {
         try {
           const targetGuild =
@@ -548,9 +615,23 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
           }
         }
       }
+
+      // Отправляем лог принятия заявки
+      await sendTicketLog({
+        guild: interaction.guild,
+        server,
+        client,
+        action: 'accepted',
+        ticket,
+        type: findType(ticket.ticket_type),
+        answers,
+        decidedBy: interaction.user.id,
+        roleNote,
+        channel: interaction.channel,
+      }).catch((err) => console.warn('Не удалось отправить лог принятия тикета:', err.message));
     }
 
-    // Решения, после которых тикет закрывается: плашка и удаление канала
+    // Решения, после которых тикет закрывается: плашка и закрытие ветки/канала
     const closing = CLOSING_DECISIONS[action];
     if (closing) {
       const finalNote = [closing.note(ticket.user_id), roleNote].filter(Boolean).join('\n\n');
@@ -567,6 +648,19 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
       content: `Статус заявки: ${statusTitle(button.status)} (решение модератора ${interaction.user.username})`,
     });
 
+    // Отправляем лог изменения статуса (на рассмотрении, вызов на обзвон)
+    await sendTicketLog({
+      guild: interaction.guild,
+      server,
+      client,
+      action,
+      ticket,
+      type: findType(ticket.ticket_type),
+      answers: ticket.answers,
+      decidedBy: interaction.user.id,
+      channel: interaction.channel,
+    }).catch((err) => console.warn('Не удалось отправить лог статуса тикета:', err.message));
+
     return interaction.reply({
       content: actionText(action, ticket, server),
       allowedMentions: { users: [ticket.user_id] },
@@ -578,6 +672,18 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
 
     const ticket = await db.findTicketByChannel(interaction.channelId);
     if (!ticket) return replyEphemeral(interaction, 'Это не канал заявки.');
+
+    await sendTicketLog({
+      guild: interaction.guild,
+      server,
+      client,
+      action: 'closed',
+      ticket,
+      type: findType(ticket.ticket_type),
+      answers: ticket.answers,
+      decidedBy: interaction.user.id,
+      channel: interaction.channel,
+    }).catch((err) => console.warn('Не удалось отправить лог закрытия тикета:', err.message));
 
     return closeTicket(interaction, interaction.user.id);
   }
@@ -697,8 +803,6 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
       content,
     });
 
-    // Модераторы сами общаются с игроком: ассистент не вмешивается.
-    // Сообщения, которые обращаются к боту, на тишину не влияют.
     const staffTalk = await db.recentStaffMessages(ticket.id, STAFF_SILENCE_MINUTES);
     if (staffTalk.some((text) => !addressesBot(text, client.user.id))) return;
 

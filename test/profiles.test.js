@@ -51,8 +51,9 @@ test('formatTelegram корректно форматирует @username, ссы
   assert.equal(formatTelegram(null), '*не указан*');
 });
 
-test('extractProfileAnswers извлекает steam и telegram из массива ответов', () => {
+test('extractProfileAnswers извлекает steam, telegram, realName и hours из массива ответов', () => {
   const answers = [
+    { id: 'name', value: 'Иван' },
     { id: 'hours', value: '1500' },
     { id: 'steam', value: '76561198012345678' },
     { id: 'telegram', value: '@testuser' },
@@ -60,10 +61,22 @@ test('extractProfileAnswers извлекает steam и telegram из масси
   assert.deepEqual(extractProfileAnswers(answers), {
     steam: '76561198012345678',
     telegram: '@testuser',
+    realName: 'Иван',
+    hours: '1500',
   });
 
-  assert.deepEqual(extractProfileAnswers([]), { steam: null, telegram: null });
-  assert.deepEqual(extractProfileAnswers(null), { steam: null, telegram: null });
+  assert.deepEqual(extractProfileAnswers([]), {
+    steam: null,
+    telegram: null,
+    realName: null,
+    hours: null,
+  });
+  assert.deepEqual(extractProfileAnswers(null), {
+    steam: null,
+    telegram: null,
+    realName: null,
+    hours: null,
+  });
 });
 
 test('parseProfilesPageId извлекает номер страницы из customId', () => {
@@ -86,6 +99,8 @@ test('renderProfilesMessage с игроками строит поля и кно�
     guild_id: '123',
     user_id: `user_${i + 1}`,
     username: `Player_${i + 1}`,
+    real_name: 'Иван',
+    hours: '2000',
     steam: '76561198000000000',
     telegram: `@player_${i + 1}`,
     created_at: new Date('2026-10-18T12:00:00Z').toISOString(),
@@ -96,6 +111,8 @@ test('renderProfilesMessage с игроками строит поля и кно�
   const embed0 = page0.embeds[0].toJSON();
   assert.equal(embed0.fields.length, 5);
   assert.ok(embed0.footer.text.includes('Страница 1 из 3 · Всего игроков: 12'));
+  assert.ok(embed0.fields[0].value.includes('Иван'));
+  assert.ok(embed0.fields[0].value.includes('2000'));
 
   const row0 = page0.components[0].toJSON();
   assert.equal(row0.components.length, 4); // Назад, Вперёд, Обновить, Удалить
@@ -114,8 +131,24 @@ test('renderProfilesMessage с игроками строит поля и кно�
 
 test('renderDeleteSelectMessage строит выпадающее меню с опциями игроков', () => {
   const sampleProfiles = [
-    { id: 1, user_id: 'user_1', username: 'Player_1', steam: '76561198000000000', telegram: '@p1' },
-    { id: 2, user_id: 'user_2', username: 'Player_2', steam: '76561198000000001', telegram: '@p2' },
+    {
+      id: 1,
+      user_id: 'user_1',
+      username: 'Player_1',
+      real_name: 'Иван',
+      hours: '1000',
+      steam: '76561198000000000',
+      telegram: '@p1',
+    },
+    {
+      id: 2,
+      user_id: 'user_2',
+      username: 'Player_2',
+      real_name: 'Алексей',
+      hours: '2500',
+      steam: '76561198000000001',
+      telegram: '@p2',
+    },
   ];
 
   const result = renderDeleteSelectMessage(sampleProfiles, '2pz');
@@ -127,4 +160,5 @@ test('renderDeleteSelectMessage строит выпадающее меню с о
   assert.equal(selectMenu.custom_id, PROFILES_DO_DELETE);
   assert.equal(selectMenu.options.length, 2);
   assert.equal(selectMenu.options[0].value, 'user_1');
+  assert.ok(selectMenu.options[0].description.includes('Иван'));
 });

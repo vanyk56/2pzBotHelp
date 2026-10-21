@@ -86,10 +86,12 @@ export function formatTelegram(telegram) {
 }
 
 export function extractProfileAnswers(answers) {
-  if (!Array.isArray(answers)) return { steam: null, telegram: null };
+  if (!Array.isArray(answers)) return { steam: null, telegram: null, realName: null, hours: null };
   const steam = answers.find((a) => a.id === 'steam')?.value?.trim() || null;
   const telegram = answers.find((a) => a.id === 'telegram')?.value?.trim() || null;
-  return { steam, telegram };
+  const realName = answers.find((a) => a.id === 'name')?.value?.trim() || null;
+  const hours = answers.find((a) => a.id === 'hours')?.value?.trim() || null;
+  return { steam, telegram, realName, hours };
 }
 
 export function renderProfilesMessage(profiles, page = 0, guildName = '') {
@@ -115,10 +117,13 @@ export function renderProfilesMessage(profiles, page = 0, guildName = '') {
     const dateObj = item.created_at ? new Date(item.created_at) : null;
     const timeUnix = dateObj && !Number.isNaN(dateObj.getTime()) ? Math.floor(dateObj.getTime() / 1000) : null;
     const timeStr = timeUnix ? `\n📅 **Принят:** <t:${timeUnix}:d>` : '';
+    const nameLine = item.real_name || item.hours
+      ? `👤 **Имя:** ${item.real_name || '—'} · ⏱️ **Часы:** ${item.hours || '—'}\n`
+      : '';
 
     embed.addFields({
       name: `${index}. ${item.username} (<@${item.user_id}>)`,
-      value: `🎮 **Steam:** ${formatSteam(item.steam)}\n✈️ **Telegram:** ${formatTelegram(item.telegram)}${timeStr}`,
+      value: `${nameLine}🎮 **Steam:** ${formatSteam(item.steam)}\n✈️ **Telegram:** ${formatTelegram(item.telegram)}${timeStr}`,
       inline: false,
     });
   }
@@ -139,14 +144,14 @@ export function renderProfilesMessage(profiles, page = 0, guildName = '') {
         .setCustomId(`${PROFILES_PAGE_PREFIX}${currentPage + 1}`)
         .setLabel('Вперёд ➡️')
         .setStyle(ButtonStyle.Secondary)
-        .setDisabled(currentPage >= totalPages - 1),
+        .setDisabled(currentPage === totalPages - 1),
     );
   }
 
   buttons.push(
     new ButtonBuilder()
       .setCustomId(`${PROFILES_PAGE_PREFIX}${currentPage}`)
-      .setLabel('🔄 Обновить')
+      .setLabel('Обновить')
       .setStyle(ButtonStyle.Secondary),
   );
 
@@ -170,11 +175,22 @@ export function renderDeleteSelectMessage(profiles, guildName = '') {
     .setTitle(`🗑️ Удаление профиля игрока${guildName ? ` · ${guildName}` : ''}`)
     .setDescription('Выберите игрока из меню ниже, чтобы удалить его профиль из базы данных:');
 
-  const options = profiles.slice(0, 25).map((p, i) => ({
-    label: `${i + 1}. ${p.username}`.slice(0, 100),
-    value: p.user_id,
-    description: `Steam: ${p.steam || '—'} | TG: ${p.telegram || '—'}`.slice(0, 100),
-  }));
+  const options = profiles.slice(0, 25).map((p, i) => {
+    const details = [
+      p.real_name ? `Имя: ${p.real_name}` : null,
+      p.hours ? `${p.hours}ч` : null,
+      `Steam: ${p.steam || '—'}`,
+      `TG: ${p.telegram || '—'}`,
+    ]
+      .filter(Boolean)
+      .join(' | ');
+
+    return {
+      label: `${i + 1}. ${p.username}`.slice(0, 100),
+      value: p.user_id,
+      description: details.slice(0, 100),
+    };
+  });
 
   const select = new StringSelectMenuBuilder()
     .setCustomId(PROFILES_DO_DELETE)

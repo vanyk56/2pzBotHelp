@@ -14,6 +14,7 @@
         "1424476290513113169"
       ],
       "acceptedRoleId": "1559166479436611624",
+      "ticketLogChannelId": null,
       "voiceChannelId": null,
       "streamChannelId": null,
       "streamers": ["chotki_mops"],
@@ -27,6 +28,8 @@
       "types": ["caller", "media", "moderator"],
       "ticketCategoryId": "1561029703794556958",
       "staffRoleIds": ["1493147074005307392", "1493147514440912956", "1493170228295766210"],
+      "acceptedRoleId": null,
+      "ticketLogChannelId": null,
       "voiceChannelId": null,
       "events": true,
       "rsvpChannelId": "1493114515418648668"

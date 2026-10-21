@@ -16,6 +16,7 @@ CREATE TABLE IF NOT EXISTS tickets (
 
 -- Тип тикета (клан, коллер, медиа, модератор); старые заявки получают 'clan'
 ALTER TABLE tickets ADD COLUMN IF NOT EXISTS ticket_type TEXT NOT NULL DEFAULT 'clan';
+ALTER TABLE tickets ADD COLUMN IF NOT EXISTS log_message_id TEXT;
 
 -- Одна незакрытая заявка на игрока
 CREATE UNIQUE INDEX IF NOT EXISTS tickets_one_active_per_user
@@ -68,6 +69,9 @@ CREATE TABLE IF NOT EXISTS user_profiles (
   updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
   CONSTRAINT user_profiles_guild_user_key UNIQUE (guild_id, user_id)
 );
+
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS real_name TEXT;
+ALTER TABLE user_profiles ADD COLUMN IF NOT EXISTS hours TEXT;
 
 CREATE INDEX IF NOT EXISTS user_profiles_guild_idx ON user_profiles (guild_id);
 
@@ -130,6 +134,10 @@ export function createDb(connectionString) {
         `UPDATE tickets SET status = $2, decided_by = $3, updated_at = now() WHERE channel_id = $1`,
         [channelId, status, decidedBy],
       );
+    },
+
+    async setTicketLogMessage(ticketId, logMessageId) {
+      await pool.query('UPDATE tickets SET log_message_id = $2 WHERE id = $1', [ticketId, logMessageId]);
     },
 
     // Тексты сообщений модераторов в тикете за последние `minutes` минут
@@ -203,19 +211,31 @@ export function createDb(connectionString) {
       return rows;
     },
 
-    async saveProfile({ guildId, userId, username, steam, telegram, ticketId = null, acceptedBy = null }) {
+    async saveProfile({
+      guildId,
+      userId,
+      username,
+      steam,
+      telegram,
+      realName = null,
+      hours = null,
+      ticketId = null,
+      acceptedBy = null,
+    }) {
       const { rows } = await pool.query(
-        `INSERT INTO user_profiles (guild_id, user_id, username, steam, telegram, ticket_id, accepted_by)
-         VALUES ($1, $2, $3, $4, $5, $6, $7)
+        `INSERT INTO user_profiles (guild_id, user_id, username, steam, telegram, real_name, hours, ticket_id, accepted_by)
+         VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
          ON CONFLICT (guild_id, user_id) DO UPDATE SET
            username = EXCLUDED.username,
            steam = COALESCE(EXCLUDED.steam, user_profiles.steam),
            telegram = COALESCE(EXCLUDED.telegram, user_profiles.telegram),
+           real_name = COALESCE(EXCLUDED.real_name, user_profiles.real_name),
+           hours = COALESCE(EXCLUDED.hours, user_profiles.hours),
            ticket_id = COALESCE(EXCLUDED.ticket_id, user_profiles.ticket_id),
            accepted_by = COALESCE(EXCLUDED.accepted_by, user_profiles.accepted_by),
            updated_at = now()
          RETURNING *`,
-        [guildId, userId, username, steam, telegram, ticketId, acceptedBy],
+        [guildId, userId, username, steam, telegram, realName, hours, ticketId, acceptedBy],
       );
       return rows[0];
     },
@@ -251,61 +271,66 @@ export function createDb(connectionString) {
       );
     },
 
-    // Отслеживаемые стримеры на сервере
-    async getTrackedStreamers(guildId) {
+    async getStreamGuildSettings(guildId) {
       const { rows } = await pool.query(
-        'SELECT streamer_login FROM stream_tracked_channels WHERE guild_id = $1 ORDER BY streamer_login ASC',
+        'SELECT channel_id, ping_role FROM stream_guild_settings WHERE guild_id = $1',
         [guildId],
       );
-      return rows.map((r) => r.streamer_login);
+      return rows[0] ?? null;
+    },
+
+    async setStreamGuildSettings(guildId, { channelId, pingRole }) {
+      await pool.query(
+        `INSERT INTO stream_guild_settings (guild_id, channel_id, ping_role, updated_at)
+         VALUES ($1, $2, $3, now())
+         ON CONFLICT (guild_id) DO UPDATE SET
+           channel_id = COALESCE(EXCLUDED.channel_id, stream_guild_settings.channel_id),
+           ping_role = EXCLUDED.ping_role,
+           updated_at = now()`,
+        [guildId, channelId, pingRole],
+      );
     },
 
     async addTrackedStreamer(guildId, login) {
       await pool.query(
         `INSERT INTO stream_tracked_channels (guild_id, streamer_login)
          VALUES ($1, $2)
-         ON CONFLICT (guild_id, streamer_login) DO NOTHING`,
+         ON CONFLICT DO NOTHING`,
         [guildId, login],
       );
     },
 
     async removeTrackedStreamer(guildId, login) {
-      const { rowCount } = await pool.query(
-        'DELETE FROM stream_tracked_channels WHERE guild_id = $1 AND streamer_login = $2',
+      await pool.query(
+        `DELETE FROM stream_tracked_channels WHERE guild_id = $1 AND streamer_login = $2`,
         [guildId, login],
       );
-      return (rowCount ?? 0) > 0;
     },
 
-    async getAllTrackedStreamers() {
+    async getTrackedStreamers(guildId) {
       const { rows } = await pool.query(
-        'SELECT DISTINCT streamer_login FROM stream_tracked_channels',
+        `SELECT streamer_login FROM stream_tracked_channels WHERE guild_id = $1 ORDER BY created_at ASC`,
+        [guildId],
       );
       return rows.map((r) => r.streamer_login);
     },
 
-    async getStreamGuildSettings(guildId) {
+    async getAllTrackedStreamers() {
       const { rows } = await pool.query(
-        'SELECT * FROM stream_guild_settings WHERE guild_id = $1',
-        [guildId],
+        `SELECT DISTINCT streamer_login FROM stream_tracked_channels`,
       );
-      return rows[0] ?? null;
+      return rows.map((r) => r.streamer_login);
     },
 
-    async setStreamGuildChannel(guildId, channelId) {
-      await pool.query(
-        `INSERT INTO stream_guild_settings (guild_id, channel_id, updated_at)
-         VALUES ($1, $2, now())
-         ON CONFLICT (guild_id) DO UPDATE SET channel_id = EXCLUDED.channel_id, updated_at = now()`,
-        [guildId, channelId],
+    async getGuildsTrackingStreamer(login) {
+      const { rows } = await pool.query(
+        `SELECT t.guild_id, s.channel_id, s.ping_role
+         FROM stream_tracked_channels t
+         LEFT JOIN stream_guild_settings s ON s.guild_id = t.guild_id
+         WHERE t.streamer_login = $1`,
+        [login],
       );
-    },
-
-    async removeStreamGuildChannel(guildId) {
-      await pool.query(
-        `UPDATE stream_guild_settings SET channel_id = NULL, updated_at = now() WHERE guild_id = $1`,
-        [guildId],
-      );
+      return rows;
     },
 
     async close() {

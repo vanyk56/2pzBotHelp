@@ -15,10 +15,19 @@
       "name": "Заявка в клан 2pz",
       "button": "Подать тикет",
       "emoji": "🎫",
-      "channelPrefix": "заявление",
+      "channelPrefix": "тикет",
       "title": "Подать тикет в 2pz",
       "nextStep": "в скором времени вас вызовут на обзвон",
       "fields": [
+        {
+          "id": "name",
+          "label": "Ваше имя",
+          "placeholder": "Как к вам обращаться",
+          "style": "short",
+          "required": true,
+          "minLength": 2,
+          "maxLength": 50
+        },
         {
           "id": "hours",
           "label": "Сколько у вас часов?",
@@ -91,10 +100,19 @@
       "name": "Коллер (16+)",
       "button": "Коллер 16+",
       "emoji": "📞",
-      "channelPrefix": "коллер",
+      "channelPrefix": "тикет-коллер",
       "title": "Заявка на коллера",
       "nextStep": "модераторы рассмотрят заявку и ответят в этом канале",
       "fields": [
+        {
+          "id": "name",
+          "label": "Ваше имя",
+          "placeholder": "Как к вам обращаться",
+          "style": "short",
+          "required": true,
+          "minLength": 2,
+          "maxLength": 50
+        },
         {
           "id": "age",
           "label": "Сколько вам лет?",
@@ -120,10 +138,19 @@
       "name": "Медиа клана",
       "button": "Медиа клана",
       "emoji": "🎬",
-      "channelPrefix": "медиа",
+      "channelPrefix": "тикет-медиа",
       "title": "Заявка: медиа клана",
       "nextStep": "модераторы посмотрят ваши каналы и ответят в этом канале",
       "fields": [
+        {
+          "id": "name",
+          "label": "Ваше имя",
+          "placeholder": "Как к вам обращаться",
+          "style": "short",
+          "required": true,
+          "minLength": 2,
+          "maxLength": 50
+        },
         {
           "id": "channel",
           "label": "Ссылка на ваш канал",
@@ -158,10 +185,19 @@
       "name": "Модератор",
       "button": "Модератор",
       "emoji": "🛡️",
-      "channelPrefix": "модератор",
+      "channelPrefix": "тикет-модератор",
       "title": "Заявка на модератора",
       "nextStep": "модераторы рассмотрят заявку и ответят в этом канале",
       "fields": [
+        {
+          "id": "name",
+          "label": "Ваше имя",
+          "placeholder": "Как к вам обращаться",
+          "style": "short",
+          "required": true,
+          "minLength": 2,
+          "maxLength": 50
+        },
         {
           "id": "age",
           "label": "Сколько вам лет?",
