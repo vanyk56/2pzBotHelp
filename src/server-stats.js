@@ -121,21 +121,30 @@ export function createServerStats({ client, db, servers, intervalMs = 10 * 60 * 
 
     // Создаём категорию, если её нет
     if (!category) {
-      category = await guild.channels.create({
-        name: categoryName,
-        type: ChannelType.GuildCategory,
-        position: 0,
-      });
+      try {
+        category = await guild.channels.create({
+          name: categoryName,
+          type: ChannelType.GuildCategory,
+          position: 0,
+        });
+      } catch (err) {
+        console.error(`Не удалось создать категорию статистики для ${guild.name}:`, err.message);
+        return null;
+      }
     }
 
     // Создаём или обновляем канал Всего участников
     if (!totalChannel) {
-      totalChannel = await guild.channels.create({
-        name: totalName,
-        type: ChannelType.GuildVoice,
-        parent: category.id,
-        permissionOverwrites: voicePerms,
-      });
+      try {
+        totalChannel = await guild.channels.create({
+          name: totalName,
+          type: ChannelType.GuildVoice,
+          parent: category.id,
+          permissionOverwrites: voicePerms,
+        });
+      } catch (err) {
+        console.error(`Не удалось создать totalChannel:`, err.message);
+      }
     } else {
       if (totalChannel.parentId !== category.id) {
         await totalChannel.setParent(category.id).catch(() => {});
@@ -151,12 +160,16 @@ export function createServerStats({ client, db, servers, intervalMs = 10 * 60 * 
 
     // Создаём или обновляем канал Онлайн
     if (!onlineChannel) {
-      onlineChannel = await guild.channels.create({
-        name: onlineName,
-        type: ChannelType.GuildVoice,
-        parent: category.id,
-        permissionOverwrites: voicePerms,
-      });
+      try {
+        onlineChannel = await guild.channels.create({
+          name: onlineName,
+          type: ChannelType.GuildVoice,
+          parent: category.id,
+          permissionOverwrites: voicePerms,
+        });
+      } catch (err) {
+        console.error(`Не удалось создать onlineChannel:`, err.message);
+      }
     } else {
       if (onlineChannel.parentId !== category.id) {
         await onlineChannel.setParent(category.id).catch(() => {});
@@ -171,11 +184,13 @@ export function createServerStats({ client, db, servers, intervalMs = 10 * 60 * 
     }
 
     // Сохраняем в БД
-    await db.setServerStatsSettings(guild.id, {
-      categoryId: category.id,
-      totalChannelId: totalChannel.id,
-      onlineChannelId: onlineChannel.id,
-    }).catch((err) => console.error('Ошибка сохранения server_stats:', err));
+    if (category && (totalChannel || onlineChannel)) {
+      await db.setServerStatsSettings(guild.id, {
+        categoryId: category.id,
+        totalChannelId: totalChannel?.id ?? null,
+        onlineChannelId: onlineChannel?.id ?? null,
+      }).catch((err) => console.error('Ошибка сохранения server_stats:', err));
+    }
 
     return {
       category,
