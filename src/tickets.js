@@ -289,11 +289,45 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
     return interaction.editReply(`Правила опубликованы и закреплены в <#${channel.id}>.`);
   }
 
+  // Проверяет наличие открытой заявки, проверяя её существование в Discord.
+  // Если канал был удален вручную в Discord (#неизвестно), бот сам закрывает старый тикет в БД.
+  async function getValidActiveTicket(userId) {
+    const active = await db.findActiveTicketByUser(userId);
+    if (!active) return null;
+
+    try {
+      const channel = await client.channels.fetch(active.channel_id).catch(() => null);
+      if (!channel || channel.deleted) {
+        await db.setStatus(active.channel_id, 'closed', 'channel_deleted');
+        return null;
+      }
+    } catch {
+      await db.setStatus(active.channel_id, 'closed', 'channel_deleted');
+      return null;
+    }
+
+    return active;
+  }
+
+  async function cleanupOrphanTickets() {
+    try {
+      const openTickets = await db.findOpenTickets();
+      for (const t of openTickets) {
+        const channel = await client.channels.fetch(t.channel_id).catch(() => null);
+        if (!channel || channel.deleted) {
+          await db.setStatus(t.channel_id, 'closed', 'orphan_cleanup');
+        }
+      }
+    } catch (err) {
+      console.warn('Ошибка очистки зависших тикетов:', err.message);
+    }
+  }
+
   async function openFormModal(interaction, type, server) {
     if (!type || !server.types.includes(type.id)) {
       return replyEphemeral(interaction, 'Этот тип тикета недоступен на этом сервере.');
     }
-    const active = await db.findActiveTicketByUser(interaction.user.id);
+    const active = await getValidActiveTicket(interaction.user.id);
     if (active) {
       return replyEphemeral(interaction, `У вас уже есть открытая заявка: <#${active.channel_id}>`);
     }
@@ -359,7 +393,7 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
     await interaction.deferReply({ flags: MessageFlags.Ephemeral });
 
     const { guild, user } = interaction;
-    const active = await db.findActiveTicketByUser(user.id);
+    const active = await getValidActiveTicket(user.id);
     if (active) {
       return interaction.editReply(`У вас уже есть открытая заявка: <#${active.channel_id}>`);
     }
@@ -809,5 +843,5 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
     enqueue(message.channelId, () => respond(message.channel, { fallback: REPLY_FALLBACK, skippable: true }));
   }
 
-  return { handleInteraction, handleMessage };
+  return { handleInteraction, handleMessage, cleanupOrphanTickets };
 }

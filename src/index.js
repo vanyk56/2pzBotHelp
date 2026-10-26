@@ -65,6 +65,9 @@ client.once(Events.ClientReady, async (readyClient) => {
   // Запуск счётчиков статистики сервера
   serverStats.start();
 
+  // Очистка зависших тикетов, каналы которых были удалены в Discord
+  await bot.cleanupOrphanTickets();
+
   console.log(`Бот ${readyClient.user.tag} запущен`);
 });
 
@@ -84,6 +87,14 @@ client.on(Events.InteractionCreate, async (interaction) => {
 
 client.on(Events.MessageCreate, (message) => {
   bot.handleMessage(message).catch((error) => console.error('Ошибка сообщения:', error));
+});
+
+client.on(Events.ChannelDelete, (channel) => {
+  db.setStatus(channel.id, 'closed', 'channel_deleted').catch(() => {});
+});
+
+client.on(Events.ThreadDelete, (thread) => {
+  db.setStatus(thread.id, 'closed', 'thread_deleted').catch(() => {});
 });
 
 async function shutdown() {

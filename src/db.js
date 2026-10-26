@@ -124,6 +124,13 @@ export function createDb(connectionString) {
       return rows[0] ?? null;
     },
 
+    async findOpenTickets() {
+      const { rows } = await pool.query(
+        `SELECT id, channel_id, user_id FROM tickets WHERE status <> 'closed'`,
+      );
+      return rows;
+    },
+
     async findTicketByChannel(channelId) {
       const { rows } = await pool.query('SELECT * FROM tickets WHERE channel_id = $1', [channelId]);
       return rows[0] ?? null;
