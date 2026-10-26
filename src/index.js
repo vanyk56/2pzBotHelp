@@ -7,6 +7,7 @@ import { createEventBot, ensureEventEmojis, EVENT_COMMAND } from './events.js';
 import { RULES_COMMAND } from './rules-card.js';
 import { PROFILES_COMMAND } from './profiles.js';
 import { createStreamAlerts, STREAM_COMMANDS } from './streams.js';
+import { createServerStats, STATS_COMMANDS } from './server-stats.js';
 
 const COMMANDS = [
   { name: 'panel', description: 'Опубликовать и закрепить кнопки подачи заявок в этом канале' },
@@ -14,6 +15,7 @@ const COMMANDS = [
   PROFILES_COMMAND,
   RULES_COMMAND,
   ...STREAM_COMMANDS,
+  ...STATS_COMMANDS,
 ];
 
 const db = createDb(config.database.url);
@@ -31,6 +33,7 @@ const bot = createTicketBot({
 });
 const events = createEventBot({ db, servers: config.discord.servers, client });
 const streams = createStreamAlerts({ client, db, servers: config.discord.servers });
+const serverStats = createServerStats({ client, db, servers: config.discord.servers });
 const HOUR_MS = 60 * 60 * 1000;
 let refreshTimer = null;
 
@@ -59,11 +62,15 @@ client.once(Events.ClientReady, async (readyClient) => {
   // Запуск мониторинга стримов Twitch
   streams.start();
 
+  // Запуск счётчиков статистики сервера
+  serverStats.start();
+
   console.log(`Бот ${readyClient.user.tag} запущен`);
 });
 
 client.on(Events.InteractionCreate, async (interaction) => {
   try {
+    if (await serverStats.handleInteraction(interaction)) return;
     if (await streams.handleInteraction(interaction)) return;
     if (await events.handleInteraction(interaction)) return;
     await bot.handleInteraction(interaction);
@@ -82,11 +89,10 @@ client.on(Events.MessageCreate, (message) => {
 async function shutdown() {
   clearInterval(refreshTimer);
   streams.stop();
+  serverStats.stop();
   await client.destroy();
   await db.close();
   process.exit(0);
 }
 process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
-
-client.login(config.discord.token);

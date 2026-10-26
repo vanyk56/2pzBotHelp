@@ -17,15 +17,16 @@
       "ticketLogChannelId": null,
       "voiceChannelId": null,
       "streamChannelId": null,
-      "streamers": ["chotki_mops"],
-      "streamRolePing": null
+      "streamers": [],
+      "streamRolePing": null,
+      "stats": true
     },
     {
       "name": "Сервер 2",
       "guildId": "1493084946749853777",
       "panelChannelId": "1561027943977984051",
       "panelKey": "secondary",
-      "types": ["caller", "media", "moderator"],
+      "types": ["caller", "media", "moderator", "warn"],
       "ticketCategoryId": "1561029703794556958",
       "staffRoleIds": ["1493147074005307392", "1493147514440912956", "1493170228295766210"],
       "acceptedRoleId": null,

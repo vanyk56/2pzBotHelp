@@ -235,6 +235,55 @@
           "minWords": 3
         }
       ]
+    },
+    {
+      "id": "warn",
+      "name": "Обжаловать варн",
+      "button": "Обжаловать варн",
+      "emoji": "⚠️",
+      "channelPrefix": "тикет-варн",
+      "title": "Обжалование варна",
+      "nextStep": "модераторы рассмотрят вашу апелляцию и ответят в этом канале",
+      "fields": [
+        {
+          "id": "name",
+          "label": "Ваше имя",
+          "placeholder": "Как к вам обращаться",
+          "style": "short",
+          "required": true,
+          "minLength": 2,
+          "maxLength": 50
+        },
+        {
+          "id": "warn_date",
+          "label": "Когда вам был выдан варн?",
+          "placeholder": "Дата и время (например: вчера в 18:00 или 25.10)",
+          "style": "short",
+          "required": true,
+          "minLength": 3,
+          "maxLength": 100
+        },
+        {
+          "id": "warn_reason",
+          "label": "За что вам был выдан варн?",
+          "placeholder": "Причина варна или пункт правил",
+          "style": "paragraph",
+          "required": true,
+          "minLength": 5,
+          "maxLength": 500,
+          "minWords": 2
+        },
+        {
+          "id": "appeal_reason",
+          "label": "Почему вы считаете, что его нужно снять?",
+          "placeholder": "Подробно и аргументированно объясните свою позицию",
+          "style": "paragraph",
+          "required": true,
+          "minLength": 15,
+          "maxLength": 1000,
+          "minWords": 3
+        }
+      ]
     }
   ]
 }

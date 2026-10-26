@@ -97,6 +97,15 @@ CREATE TABLE IF NOT EXISTS stream_tracked_channels (
   created_at        TIMESTAMPTZ NOT NULL DEFAULT now(),
   PRIMARY KEY (guild_id, streamer_login)
 );
+
+-- Статистика сервера: каналы с количеством участников и онлайном
+CREATE TABLE IF NOT EXISTS server_stats (
+  guild_id          TEXT PRIMARY KEY,
+  category_id       TEXT,
+  total_channel_id  TEXT,
+  online_channel_id TEXT,
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `;
 
 export function createDb(connectionString) {
@@ -301,10 +310,11 @@ export function createDb(connectionString) {
     },
 
     async removeTrackedStreamer(guildId, login) {
-      await pool.query(
+      const result = await pool.query(
         `DELETE FROM stream_tracked_channels WHERE guild_id = $1 AND streamer_login = $2`,
         [guildId, login],
       );
+      return (result.rowCount ?? 0) > 0;
     },
 
     async getTrackedStreamers(guildId) {
@@ -331,6 +341,27 @@ export function createDb(connectionString) {
         [login],
       );
       return rows;
+    },
+
+    async getServerStatsSettings(guildId) {
+      const { rows } = await pool.query(
+        `SELECT category_id, total_channel_id, online_channel_id FROM server_stats WHERE guild_id = $1`,
+        [guildId],
+      );
+      return rows[0] ?? null;
+    },
+
+    async setServerStatsSettings(guildId, { categoryId, totalChannelId, onlineChannelId }) {
+      await pool.query(
+        `INSERT INTO server_stats (guild_id, category_id, total_channel_id, online_channel_id, updated_at)
+         VALUES ($1, $2, $3, $4, now())
+         ON CONFLICT (guild_id) DO UPDATE SET
+           category_id = EXCLUDED.category_id,
+           total_channel_id = EXCLUDED.total_channel_id,
+           online_channel_id = EXCLUDED.online_channel_id,
+           updated_at = now()`,
+        [guildId, categoryId, totalChannelId, onlineChannelId],
+      );
     },
 
     async close() {

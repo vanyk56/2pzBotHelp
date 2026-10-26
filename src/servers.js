@@ -59,8 +59,10 @@ export function loadServers(url) {
       streamChannelId: server.streamChannelId ? snowflake(server.streamChannelId, 'streamChannelId') : null,
       streamers: Array.isArray(server.streamers)
         ? server.streamers.map((s) => String(s).toLowerCase().trim())
-        : ['chotki_mops'],
+        : [],
       streamRolePing: server.streamRolePing ? String(server.streamRolePing) : null,
+      // Счётчики статистики сервера (MEMBERS / ONLINE)
+      stats: server.stats === true,
     };
   });
 }

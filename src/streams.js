@@ -222,7 +222,7 @@ export function createStreamAlerts({ client, db, servers, pollIntervalMs = 60_00
   async function getEffectiveStreamers(server) {
     const dbStreamers = await db.getTrackedStreamers(server.guildId).catch(() => []);
     if (dbStreamers.length > 0) return dbStreamers;
-    return server.streamers ?? ['chotki_mops'];
+    return server.streamers ?? [];
   }
 
   async function checkStreamer(login) {
@@ -286,7 +286,7 @@ export function createStreamAlerts({ client, db, servers, pollIntervalMs = 60_00
 
     // Добавляем стримеров из конфига серверов
     for (const server of servers) {
-      for (const s of server.streamers ?? ['chotki_mops']) {
+      for (const s of server.streamers ?? []) {
         allStreamers.add(s);
       }
     }
@@ -350,13 +350,23 @@ export function createStreamAlerts({ client, db, servers, pollIntervalMs = 60_00
       }
 
       await interaction.deferReply({ flags: MessageFlags.Ephemeral });
-      const removed = await db.removeTrackedStreamer(interaction.guildId, login);
-      if (!removed) {
+      const removedFromDb = await db.removeTrackedStreamer(interaction.guildId, login);
+
+      let removedFromConfig = false;
+      if (server && Array.isArray(server.streamers)) {
+        const idx = server.streamers.indexOf(login);
+        if (idx !== -1) {
+          server.streamers.splice(idx, 1);
+          removedFromConfig = true;
+        }
+      }
+
+      if (!removedFromDb && !removedFromConfig) {
         await interaction.editReply(`Канал **${login}** не был найден в списке добавленных.`);
         return true;
       }
 
-      await interaction.editReply(`🗑️ Канал **${login}** удалён из рассылки стримов.`);
+      await interaction.editReply(`🗑️ Канал **${login}** успешно удалён из рассылки стримов.`);
       return true;
     }
 

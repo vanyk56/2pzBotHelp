@@ -6,6 +6,7 @@ const clan = findType('clan');
 const caller = findType('caller');
 const media = findType('media');
 const moderator = findType('moderator');
+const warn = findType('warn');
 
 const answersFrom = (type, values) =>
   type.fields.map((field) => ({ id: field.id, label: field.label, value: values[field.id] ?? '' }));
@@ -97,4 +98,25 @@ test('модератор с одними единицами отклоняетс
   const labels = problemLabels(moderator, { name: 'Иван', age: '20', hours: '500', mod_experience: '1', why: '1' });
   assert.ok(labels.includes('Опыт модерации (где и сколько)'));
   assert.ok(labels.includes('Почему хотите стать модератором?'));
+});
+
+test('анкета обжалования варна валидируется корректно', () => {
+  assert.ok(warn);
+  assert.equal(warn.id, 'warn');
+  assert.equal(warn.fields.length, 4);
+
+  const invalid = { name: '', warn_date: '', warn_reason: '1', appeal_reason: '1' };
+  const labels = problemLabels(warn, invalid);
+  assert.ok(labels.includes('Ваше имя'));
+  assert.ok(labels.includes('Когда вам был выдан варн?'));
+  assert.ok(labels.includes('За что вам был выдан варн?'));
+  assert.ok(labels.includes('Почему вы считаете, что его нужно снять?'));
+
+  const valid = {
+    name: 'Иван',
+    warn_date: 'Вчера в 18:00',
+    warn_reason: 'Флуд в голосовом канале во время рейда',
+    appeal_reason: 'Я полностью осознал свою ошибку, извинился перед сокланами и обещаю больше не нарушать регламент.',
+  };
+  assert.deepEqual(validateAnswers(answersFrom(warn, valid), warn), []);
 });
