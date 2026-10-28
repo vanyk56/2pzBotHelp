@@ -39,6 +39,7 @@ import {
 import { sendTicketLog } from './ticket-logs.js';
 import { buildSteamCheckEmbed, checkSteamAccount } from './steam.js';
 import { buildTranscriptAttachment } from './transcript.js';
+import { buildVerdictCardAttachment, buildDialogueCardAttachment } from './ticket-card.js';
 
 // Загружает 3D эмодзи из assets/emoji на сервер, если их там ещё нет
 export async function ensureTicketEmojis(guild) {
@@ -593,34 +594,47 @@ export function createTicketBot({ client, db, ai, servers, contextMessages, stea
     const channel = interaction.channel;
     const ticket = await db.findTicketByChannel(interaction.channelId);
 
-    // Генерируем HTML-транскрипт тикета
+    // Генерируем HTML-транскрипт тикета и графическую карточку диалога
     let transcriptAttachment = null;
+    let dialogueCardAttachment = null;
     if (channel && ticket) {
       try {
         const fetchedMessages = await channel.messages?.fetch({ limit: 100 }).catch(() => null);
         if (fetchedMessages) {
+          const messagesArray = Array.from(fetchedMessages.values());
           transcriptAttachment = buildTranscriptAttachment({
             ticket,
             type: findType(ticket.ticket_type),
             guild: interaction.guild,
             closedBy: interaction.user?.username || decidedBy,
-            messages: Array.from(fetchedMessages.values()),
+            messages: messagesArray,
           });
+
+          dialogueCardAttachment = await buildDialogueCardAttachment({
+            ticketId: ticket.id,
+            typeName: findType(ticket.ticket_type)?.name || 'Тикет',
+            guildName: interaction.guild?.name || '2PZ CLAN',
+            messages: [...messagesArray].reverse(),
+          }).catch(() => null);
         }
       } catch (err) {
-        console.warn('Ошибка генерации HTML-транскрипта:', err.message);
+        console.warn('Ошибка генерации HTML-транскрипта или карточки диалога:', err.message);
       }
     }
 
-    // Отправляем транскрипт в ЛС игроку
-    if (transcriptAttachment && ticket?.user_id) {
+    // Отправляем карточку диалога и транскрипт в ЛС игроку
+    if (ticket?.user_id && (dialogueCardAttachment || transcriptAttachment)) {
       try {
         const dmUser = await client.users.fetch(ticket.user_id).catch(() => null);
         if (dmUser) {
           const typeName = findType(ticket.ticket_type)?.name || 'Тикет';
+          const dmFiles = [];
+          if (dialogueCardAttachment) dmFiles.push(dialogueCardAttachment);
+          if (transcriptAttachment) dmFiles.push(transcriptAttachment);
+
           await dmUser.send({
-            content: `📄 **История вашего тикета #${ticket.id} (${typeName})**\nСервер: **${interaction.guild?.name || '2pz'}**\nТикет закрыт. Копия всей переписки прикреплена в файле:`,
-            files: [transcriptAttachment],
+            content: `📄 **История вашего тикета #${ticket.id} (${typeName})**\nСервер: **${interaction.guild?.name || '2pz'}**\nТикет закрыт модерацией:`,
+            files: dmFiles,
           }).catch(() => {});
         }
       } catch (err) {
@@ -676,18 +690,38 @@ export function createTicketBot({ client, db, ai, servers, contextMessages, stea
     return texts[action];
   }
 
-  // Личное сообщение игроку с причиной отказа. Возвращает false, если ЛС закрыты
-  async function sendRejectionDm(userId, reason, guildName) {
+  // Личное сообщение игроку с графической карточкой отказа. Возвращает false, если ЛС закрыты
+  async function sendRejectionDm(userId, reason, guildName, ticket = null, moderator = 'Модерация') {
     try {
       const user = await client.users.fetch(userId);
-      await user.send({
-        embeds: [
-          new EmbedBuilder()
-            .setColor(0xed4245)
-            .setTitle(`Заявка отклонена · ${guildName}`)
-            .setDescription(`**Причина:** ${reason}\n\nСпасибо за интерес! Если появятся вопросы, создайте новый тикет.`),
-        ],
-      });
+      const typeName = ticket ? (findType(ticket.ticket_type)?.name || 'Тикет') : 'Заявка';
+
+      let cardAttachment = null;
+      try {
+        cardAttachment = await buildVerdictCardAttachment({
+          ticketId: ticket?.id || 0,
+          typeName,
+          status: 'rejected',
+          reason,
+          moderator,
+          guildName,
+        });
+      } catch (err) {
+        console.warn('Не удалось сгенерировать графическую карточку отказа:', err.message);
+      }
+
+      if (cardAttachment) {
+        await user.send({ files: [cardAttachment] });
+      } else {
+        await user.send({
+          embeds: [
+            new EmbedBuilder()
+              .setColor(0xed4245)
+              .setTitle(`Заявка отклонена · ${guildName}`)
+              .setDescription(`**Причина:** ${reason}\n\nСпасибо за интерес! Если появятся вопросы, создайте новый тикет.`),
+          ],
+        });
+      }
       return true;
     } catch (error) {
       console.warn('Не удалось отправить причину отказа в ЛС:', error.message);
@@ -708,7 +742,7 @@ export function createTicketBot({ client, db, ai, servers, contextMessages, stea
     }
 
     const reason = interaction.fields.getTextInputValue('reason').trim();
-    const delivered = await sendRejectionDm(ticket.user_id, reason, interaction.guild.name);
+    const delivered = await sendRejectionDm(ticket.user_id, reason, interaction.guild.name, ticket, interaction.user.username);
     await db.addMessage(ticket.id, {
       role: 'system',
       content: `Заявка отклонена (решение модератора ${interaction.user.username}). Причина: ${reason}`,
@@ -820,6 +854,27 @@ export function createTicketBot({ client, db, ai, servers, contextMessages, stea
         roleNote,
         channel: interaction.channel,
       }).catch((err) => console.warn('Не удалось отправить лог принятия тикета:', err.message));
+
+      // Отправляем графическую карточку принятия в ЛС игроку
+      try {
+        const acceptUser = await client.users.fetch(ticket.user_id).catch(() => null);
+        if (acceptUser) {
+          const typeName = findType(ticket.ticket_type)?.name || 'Тикет';
+          const cardAttachment = await buildVerdictCardAttachment({
+            ticketId: ticket.id,
+            typeName,
+            status: 'accepted',
+            moderator: interaction.user.username,
+            guildName: interaction.guild?.name || '2PZ CLAN',
+          }).catch(() => null);
+
+          if (cardAttachment) {
+            await acceptUser.send({ files: [cardAttachment] }).catch(() => {});
+          }
+        }
+      } catch (err) {
+        console.warn('Не удалось отправить карточку принятия в ЛС:', err.message);
+      }
     }
 
     // Решения, после которых тикет закрывается: плашка и закрытие ветки/канала
