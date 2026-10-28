@@ -8,6 +8,7 @@ import {
   MessageFlags,
   ModalBuilder,
   PermissionFlagsBits,
+  StringSelectMenuBuilder,
   TextInputBuilder,
   TextInputStyle,
 } from 'discord.js';
@@ -41,6 +42,7 @@ import { buildTranscriptAttachment } from './transcript.js';
 // Кнопка открытия формы: ticket:open:<id типа>. Старый ticket:open означает клан (панели, опубликованные до перехода)
 const OPEN_PREFIX = 'ticket:open:';
 const LEGACY_OPEN_ID = 'ticket:open';
+const SELECT_OPEN_ID = 'ticket:select_open';
 const ACTION_PREFIX = 'ticket:act:';
 const NEXT_PREFIX = 'ticket:next:';
 const GREETING_FALLBACK = 'Спасибо за заявку! Модераторы скоро её рассмотрят, ответ появится в этом канале.';
@@ -216,27 +218,44 @@ export function createTicketBot({ client, db, ai, servers, contextMessages, stea
     await message.pin().catch((error) => console.warn('Не удалось закрепить заявку:', error.message));
   }
 
-  // Панель сервера: текст из tickets.json и кнопка на каждый тип, включённый на этом сервере
+  // Панель сервера: выпадающий список (Select Menu) или кнопка
   function panelPayload(server) {
     const panel = ticketConfig.panels[server.panelKey];
     const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(panel.title).setDescription(panel.description);
 
-    const buttons = server.types.map((typeId) => {
-      const type = findType(typeId);
-      const button = new ButtonBuilder()
-        .setCustomId(`${OPEN_PREFIX}${type.id}`)
-        .setLabel(type.button)
-        .setStyle(ButtonStyle.Primary);
-      if (type.emoji) button.setEmoji(type.emoji);
-      return button;
-    });
+    // Если на сервере больше одного типа тикетов (как на Сервере 2) — используем стильный выпадающий список
+    if (server.types.length > 1) {
+      const selectMenu = new StringSelectMenuBuilder()
+        .setCustomId(SELECT_OPEN_ID)
+        .setPlaceholder('Выберите причину обращения...')
+        .addOptions(
+          server.types.map((typeId) => {
+            const type = findType(typeId);
+            const opt = {
+              label: type.name,
+              value: type.id,
+              description: type.description || type.title || 'Подать заявку',
+            };
+            if (type.emoji) opt.emoji = type.emoji;
+            return opt;
+          }),
+        );
 
-    const rows = [];
-    for (let i = 0; i < buttons.length; i += 5) {
-      rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
+      return {
+        embeds: [embed],
+        components: [new ActionRowBuilder().addComponents(selectMenu)],
+      };
     }
 
-    return { embeds: [embed], components: rows };
+    // Если тип один — аккуратная кнопка
+    const type = findType(server.types[0]);
+    const button = new ButtonBuilder()
+      .setCustomId(`${OPEN_PREFIX}${type.id}`)
+      .setLabel(type.button)
+      .setStyle(ButtonStyle.Primary);
+    if (type.emoji) button.setEmoji(type.emoji);
+
+    return { embeds: [embed], components: [new ActionRowBuilder().addComponents(button)] };
   }
 
   // Публикует панель сервера и снимает старые панели бота, чтобы в канале оставалась одна актуальная
@@ -247,7 +266,12 @@ export function createTicketBot({ client, db, ai, servers, contextMessages, stea
       const isOldPanel =
         message.author.id === client.user.id &&
         message.components.some((row) =>
-          row.components.some((c) => c.customId?.startsWith(OPEN_PREFIX) || c.customId === LEGACY_OPEN_ID),
+          row.components.some(
+            (c) =>
+              c.customId?.startsWith(OPEN_PREFIX) ||
+              c.customId === LEGACY_OPEN_ID ||
+              c.customId === SELECT_OPEN_ID,
+          ),
         );
       if (isOldPanel) await message.delete().catch(() => {});
     }
@@ -830,6 +854,14 @@ export function createTicketBot({ client, db, ai, servers, contextMessages, stea
       if (interaction.commandName === 'rules') return rulesCommand(interaction, server);
       if (interaction.commandName === 'profiles') return profilesCommand(interaction, server);
       return null;
+    }
+
+    if (interaction.isStringSelectMenu()) {
+      if (interaction.customId === SELECT_OPEN_ID) {
+        const typeId = interaction.values[0];
+        const type = findType(typeId);
+        return openFormModal(interaction, type, server);
+      }
     }
 
     if (interaction.isButton()) {

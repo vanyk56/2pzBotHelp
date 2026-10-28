@@ -124,6 +124,35 @@ CREATE TABLE IF NOT EXISTS user_warns (
 );
 
 CREATE INDEX IF NOT EXISTS user_warns_guild_user_active_idx ON user_warns (guild_id, user_id, active);
+
+-- Идеи и предложения по развитию клана
+CREATE TABLE IF NOT EXISTS ideas (
+  id            BIGSERIAL PRIMARY KEY,
+  guild_id      TEXT        NOT NULL,
+  channel_id    TEXT        NOT NULL,
+  message_id    TEXT,
+  thread_id     TEXT,
+  user_id       TEXT        NOT NULL,
+  username      TEXT        NOT NULL,
+  title         TEXT        NOT NULL,
+  content       TEXT        NOT NULL,
+  status        TEXT        NOT NULL DEFAULT 'open',
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS idea_votes (
+  idea_id       BIGINT      NOT NULL REFERENCES ideas (id) ON DELETE CASCADE,
+  user_id       TEXT        NOT NULL,
+  vote          TEXT        NOT NULL,
+  updated_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  PRIMARY KEY (idea_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS idea_settings (
+  guild_id          TEXT PRIMARY KEY,
+  ideas_channel_id  TEXT,
+  updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
+);
 `;
 
 export function createDb(connectionString) {
@@ -465,6 +494,78 @@ export function createDb(connectionString) {
         [userId],
       );
       return rows;
+    },
+
+    async createIdea({ guildId, channelId, userId, username, title, content }) {
+      const { rows } = await pool.query(
+        `INSERT INTO ideas (guild_id, channel_id, user_id, username, title, content)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [guildId, channelId, userId, username, title, content],
+      );
+      return rows[0];
+    },
+
+    async setIdeaMessageAndThread(ideaId, messageId, threadId) {
+      await pool.query(
+        `UPDATE ideas SET message_id = $2, thread_id = $3 WHERE id = $1`,
+        [ideaId, messageId, threadId],
+      );
+    },
+
+    async getIdea(ideaId) {
+      const { rows } = await pool.query('SELECT * FROM ideas WHERE id = $1', [ideaId]);
+      return rows[0] ?? null;
+    },
+
+    async voteIdea(ideaId, userId, vote) {
+      const existing = await pool.query(
+        'SELECT vote FROM idea_votes WHERE idea_id = $1 AND user_id = $2',
+        [ideaId, userId],
+      );
+      if (existing.rows[0]?.vote === vote) {
+        await pool.query('DELETE FROM idea_votes WHERE idea_id = $1 AND user_id = $2', [ideaId, userId]);
+        return { action: 'removed', vote };
+      }
+      await pool.query(
+        `INSERT INTO idea_votes (idea_id, user_id, vote, updated_at)
+         VALUES ($1, $2, $3, now())
+         ON CONFLICT (idea_id, user_id) DO UPDATE SET vote = EXCLUDED.vote, updated_at = now()`,
+        [ideaId, userId, vote],
+      );
+      return { action: 'voted', vote };
+    },
+
+    async getIdeaVotesCount(ideaId) {
+      const { rows } = await pool.query(
+        `SELECT vote, COUNT(*)::int AS count FROM idea_votes WHERE idea_id = $1 GROUP BY vote`,
+        [ideaId],
+      );
+      let yes = 0;
+      let no = 0;
+      for (const r of rows) {
+        if (r.vote === 'yes') yes = r.count;
+        if (r.vote === 'no') no = r.count;
+      }
+      return { yes, no };
+    },
+
+    async getIdeaSettings(guildId) {
+      const { rows } = await pool.query(
+        'SELECT ideas_channel_id FROM idea_settings WHERE guild_id = $1',
+        [guildId],
+      );
+      return rows[0] ?? null;
+    },
+
+    async setIdeaSettings(guildId, { ideasChannelId }) {
+      await pool.query(
+        `INSERT INTO idea_settings (guild_id, ideas_channel_id, updated_at)
+         VALUES ($1, $2, now())
+         ON CONFLICT (guild_id) DO UPDATE SET
+           ideas_channel_id = EXCLUDED.ideas_channel_id,
+           updated_at = now()`,
+        [guildId, ideasChannelId],
+      );
     },
 
     async close() {
