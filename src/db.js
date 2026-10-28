@@ -106,6 +106,24 @@ CREATE TABLE IF NOT EXISTS server_stats (
   online_channel_id TEXT,
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+-- Варны игроков
+CREATE TABLE IF NOT EXISTS user_warns (
+  id            BIGSERIAL PRIMARY KEY,
+  guild_id      TEXT        NOT NULL,
+  user_id       TEXT        NOT NULL,
+  moderator_id  TEXT        NOT NULL,
+  reason        TEXT        NOT NULL,
+  duration_days INT         NOT NULL DEFAULT 7,
+  expires_at    TIMESTAMPTZ NOT NULL,
+  active        BOOLEAN     NOT NULL DEFAULT true,
+  created_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
+  unwarned_by   TEXT,
+  unwarn_reason TEXT,
+  unwarned_at   TIMESTAMPTZ
+);
+
+CREATE INDEX IF NOT EXISTS user_warns_guild_user_active_idx ON user_warns (guild_id, user_id, active);
 `;
 
 export function createDb(connectionString) {
@@ -369,6 +387,84 @@ export function createDb(connectionString) {
            updated_at = now()`,
         [guildId, categoryId, totalChannelId, onlineChannelId],
       );
+    },
+
+    async addWarn({ guildId, userId, moderatorId, reason, durationDays = 7, expiresAt }) {
+      const { rows } = await pool.query(
+        `INSERT INTO user_warns (guild_id, user_id, moderator_id, reason, duration_days, expires_at)
+         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+        [guildId, userId, moderatorId, reason, durationDays, expiresAt],
+      );
+      return rows[0];
+    },
+
+    async getActiveWarns(guildId, userId) {
+      const { rows } = await pool.query(
+        `SELECT * FROM user_warns
+         WHERE guild_id = $1 AND user_id = $2 AND active = true AND expires_at > now()
+         ORDER BY id DESC`,
+        [guildId, userId],
+      );
+      return rows;
+    },
+
+    async getAllWarns(guildId, userId) {
+      const { rows } = await pool.query(
+        `SELECT * FROM user_warns
+         WHERE guild_id = $1 AND user_id = $2
+         ORDER BY id DESC`,
+        [guildId, userId],
+      );
+      return rows;
+    },
+
+    async getWarnById(warnId) {
+      const { rows } = await pool.query('SELECT * FROM user_warns WHERE id = $1', [warnId]);
+      return rows[0] ?? null;
+    },
+
+    async removeWarn(warnId, unwarnedBy, unwarnReason = null) {
+      const { rows } = await pool.query(
+        `UPDATE user_warns
+         SET active = false, unwarned_by = $2, unwarn_reason = $3, unwarned_at = now()
+         WHERE id = $1 AND active = true
+         RETURNING *`,
+        [warnId, unwarnedBy, unwarnReason],
+      );
+      return rows[0] ?? null;
+    },
+
+    async removeLatestActiveWarn(guildId, userId, unwarnedBy, unwarnReason = null) {
+      const { rows } = await pool.query(
+        `UPDATE user_warns
+         SET active = false, unwarned_by = $3, unwarn_reason = $4, unwarned_at = now()
+         WHERE id = (
+           SELECT id FROM user_warns
+           WHERE guild_id = $1 AND user_id = $2 AND active = true AND expires_at > now()
+           ORDER BY id DESC
+           LIMIT 1
+         )
+         RETURNING *`,
+        [guildId, userId, unwarnedBy, unwarnReason],
+      );
+      return rows[0] ?? null;
+    },
+
+    async getUserProfile(guildId, userId) {
+      const { rows } = await pool.query(
+        'SELECT * FROM user_profiles WHERE guild_id = $1 AND user_id = $2',
+        [guildId, userId],
+      );
+      return rows[0] ?? null;
+    },
+
+    async getUserTickets(userId) {
+      const { rows } = await pool.query(
+        `SELECT id, guild_id, channel_id, ticket_type, status, created_at, decided_by
+         FROM tickets WHERE user_id = $1 ORDER BY id DESC LIMIT 10`,
+        [userId],
+      );
+      return rows;
     },
 
     async close() {

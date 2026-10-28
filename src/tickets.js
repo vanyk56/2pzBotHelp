@@ -35,6 +35,8 @@ import {
   renderProfilesMessage,
 } from './profiles.js';
 import { sendTicketLog } from './ticket-logs.js';
+import { buildSteamCheckEmbed, checkSteamAccount } from './steam.js';
+import { buildTranscriptAttachment } from './transcript.js';
 
 // Кнопка открытия формы: ticket:open:<id типа>. Старый ticket:open означает клан (панели, опубликованные до перехода)
 const OPEN_PREFIX = 'ticket:open:';
@@ -128,7 +130,7 @@ function problemsText(problems) {
   return `Заявка не отправлена, анкета заполнена некорректно. Исправьте поля и подайте заново:\n${lines.join('\n')}`;
 }
 
-export function createTicketBot({ client, db, ai, servers, contextMessages }) {
+export function createTicketBot({ client, db, ai, servers, contextMessages, steamApiKey = null }) {
   // Бот работает на нескольких серверах: настройки берём по ID сервера, с которого пришло событие
   const serverByGuild = new Map(servers.map((server) => [server.guildId, server]));
   // Ответы модели идут по одному на канал, чтобы не перемешивались
@@ -485,13 +487,99 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
       channel,
     }).catch((err) => console.warn('Не удалось отправить лог создания тикета:', err.message));
 
+    // Автопроверка Steam-аккаунта (если указан в ответах)
+    const answersList = Array.isArray(answers) ? answers : [];
+    const steamAnswer = answersList.find((a) => a.id === 'steam' || /steam/i.test(a.label));
+    if (steamAnswer?.value && steamApiKey) {
+      checkSteamAccount(steamAnswer.value, steamApiKey)
+        .then((checkResult) => {
+          const embed = buildSteamCheckEmbed(checkResult);
+          if (embed) channel.send({ embeds: [embed] }).catch(() => {});
+        })
+        .catch((err) => console.warn('Ошибка проверки Steam:', err.message));
+    }
+
+    // Если тикет на обжалование варна — подтягиваем активные варны игрока для модераторов
+    if (type.id === 'warn') {
+      db.getActiveWarns(server.guildId, ticket.user_id)
+        .then((activeWarns) => {
+          if (activeWarns?.length > 0) {
+            const lines = activeWarns.map((w) => {
+              const expUnix = Math.floor(new Date(w.expires_at).getTime() / 1000);
+              const createdUnix = Math.floor(new Date(w.created_at).getTime() / 1000);
+              return `• **Варн #${w.id}**: «${w.reason}» (выдан <@${w.moderator_id}> <t:${createdUnix}:d>, истекает <t:${expUnix}:R>)`;
+            });
+            const warnEmbed = new EmbedBuilder()
+              .setColor(0xfee75c)
+              .setTitle(`⚠️ Найдены активные варны игрока (${activeWarns.length}/3)`)
+              .setDescription(lines.join('\n'));
+            channel.send({ embeds: [warnEmbed] }).catch(() => {});
+          }
+        })
+        .catch((err) => console.warn('Ошибка получения варнов для тикета:', err.message));
+    }
+
     enqueue(channel.id, () =>
       respond(channel, { extra: [{ role: 'system', content: greetingRequest(type) }], fallback: GREETING_FALLBACK }),
     );
   }
 
   // Закрывает заявку (освобождает слот у игрока), показывает плашку и блокирует/архивирует ветку или удаляет канал
-  async function closeTicket(interaction, decidedBy, note) {
+  async function closeTicket(interaction, decidedBy, note, { skipLog = false } = {}) {
+    const channel = interaction.channel;
+    const ticket = await db.findTicketByChannel(interaction.channelId);
+
+    // Генерируем HTML-транскрипт тикета
+    let transcriptAttachment = null;
+    if (channel && ticket) {
+      try {
+        const fetchedMessages = await channel.messages?.fetch({ limit: 100 }).catch(() => null);
+        if (fetchedMessages) {
+          transcriptAttachment = buildTranscriptAttachment({
+            ticket,
+            type: findType(ticket.ticket_type),
+            guild: interaction.guild,
+            closedBy: interaction.user?.username || decidedBy,
+            messages: Array.from(fetchedMessages.values()),
+          });
+        }
+      } catch (err) {
+        console.warn('Ошибка генерации HTML-транскрипта:', err.message);
+      }
+    }
+
+    // Отправляем транскрипт в ЛС игроку
+    if (transcriptAttachment && ticket?.user_id) {
+      try {
+        const dmUser = await client.users.fetch(ticket.user_id).catch(() => null);
+        if (dmUser) {
+          const typeName = findType(ticket.ticket_type)?.name || 'Тикет';
+          await dmUser.send({
+            content: `📄 **История вашего тикета #${ticket.id} (${typeName})**\nСервер: **${interaction.guild?.name || '2pz'}**\nТикет закрыт. Копия всей переписки прикреплена в файле:`,
+            files: [transcriptAttachment],
+          }).catch(() => {});
+        }
+      } catch (err) {
+        console.warn('Не удалось отправить транскрипт в ЛС:', err.message);
+      }
+    }
+
+    // Логируем закрытие в канал логов с файлом транскрипта
+    if (!skipLog && ticket) {
+      await sendTicketLog({
+        guild: interaction.guild,
+        server: serverByGuild.get(interaction.guildId),
+        client,
+        action: 'closed',
+        ticket,
+        type: findType(ticket.ticket_type),
+        answers: ticket.answers,
+        decidedBy,
+        channel: interaction.channel,
+        files: transcriptAttachment ? [transcriptAttachment] : [],
+      }).catch((err) => console.warn('Не удалось отправить лог закрытия тикета:', err.message));
+    }
+
     await db.setStatus(interaction.channelId, 'closed', decidedBy);
     const isThread = Boolean(interaction.channel?.isThread?.());
     const payload = { embeds: [closedEmbed(note, isThread)] };
@@ -583,7 +671,7 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
     ]
       .filter(Boolean)
       .join('\n\n');
-    return closeTicket(interaction, interaction.user.id, note);
+    return closeTicket(interaction, interaction.user.id, note, { skipLog: true });
   }
 
   async function staffAction(interaction, action, server) {
@@ -678,7 +766,7 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
         role: 'system',
         content: `Заявка ${closing.verdict} (решение модератора ${interaction.user.username}), канал закрыт. ${roleNote}`,
       });
-      return closeTicket(interaction, interaction.user.id, finalNote);
+      return closeTicket(interaction, interaction.user.id, finalNote, { skipLog: true });
     }
 
     await db.setStatus(ticket.channel_id, button.status, interaction.user.id);
@@ -711,18 +799,6 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
 
     const ticket = await db.findTicketByChannel(interaction.channelId);
     if (!ticket) return replyEphemeral(interaction, 'Это не канал заявки.');
-
-    await sendTicketLog({
-      guild: interaction.guild,
-      server,
-      client,
-      action: 'closed',
-      ticket,
-      type: findType(ticket.ticket_type),
-      answers: ticket.answers,
-      decidedBy: interaction.user.id,
-      channel: interaction.channel,
-    }).catch((err) => console.warn('Не удалось отправить лог закрытия тикета:', err.message));
 
     return closeTicket(interaction, interaction.user.id);
   }

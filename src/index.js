@@ -8,11 +8,15 @@ import { RULES_COMMAND } from './rules-card.js';
 import { PROFILES_COMMAND } from './profiles.js';
 import { createStreamAlerts, STREAM_COMMANDS } from './streams.js';
 import { createServerStats, STATS_COMMANDS } from './server-stats.js';
+import { createWarnManager, WARN_COMMANDS } from './warns.js';
+import { createWhoisManager, WHOIS_COMMAND } from './whois.js';
 
 const COMMANDS = [
   { name: 'panel', description: 'Опубликовать и закрепить кнопки подачи заявок в этом канале' },
   { name: 'close', description: 'Закрыть тикет и удалить его канал' },
   PROFILES_COMMAND,
+  WHOIS_COMMAND,
+  ...WARN_COMMANDS,
   RULES_COMMAND,
   ...STREAM_COMMANDS,
   ...STATS_COMMANDS,
@@ -30,10 +34,19 @@ const bot = createTicketBot({
   ai,
   servers: config.discord.servers,
   contextMessages: config.ai.contextMessages,
+  steamApiKey: config.steam.apiKey,
 });
 const events = createEventBot({ db, servers: config.discord.servers, client });
 const streams = createStreamAlerts({ client, db, servers: config.discord.servers });
 const serverStats = createServerStats({ client, db, servers: config.discord.servers });
+const warnManager = createWarnManager({ db, client, servers: config.discord.servers });
+const whoisManager = createWhoisManager({
+  db,
+  client,
+  servers: config.discord.servers,
+  steamApiKey: config.steam.apiKey,
+});
+
 const HOUR_MS = 60 * 60 * 1000;
 let refreshTimer = null;
 
@@ -76,6 +89,8 @@ client.on(Events.InteractionCreate, async (interaction) => {
     if (await serverStats.handleInteraction(interaction)) return;
     if (await streams.handleInteraction(interaction)) return;
     if (await events.handleInteraction(interaction)) return;
+    if (await warnManager.handleInteraction(interaction)) return;
+    if (await whoisManager.handleInteraction(interaction)) return;
     await bot.handleInteraction(interaction);
   } catch (error) {
     console.error('Ошибка взаимодействия:', error);
@@ -109,4 +124,3 @@ process.on('SIGINT', shutdown);
 process.on('SIGTERM', shutdown);
 
 client.login(config.discord.token);
-

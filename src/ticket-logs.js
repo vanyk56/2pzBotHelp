@@ -252,6 +252,7 @@ export async function sendTicketLog({
   reason,
   roleNote,
   channel,
+  files = [],
 }) {
   try {
     const logChannel = await getOrCreateTicketLogChannel(guild, server, client);
@@ -271,9 +272,83 @@ export async function sendTicketLog({
       threadUrl,
     });
 
+    if (files?.length > 0) {
+      payload.files = files;
+    }
+
     return await logChannel.send(payload);
   } catch (error) {
     console.error('Ошибка отправки лога тикета:', error);
+    return null;
+  }
+}
+
+export function buildWarnLogEmbed({
+  action = 'warn',
+  warn,
+  moderatorId,
+  targetUserId,
+  activeCount = 1,
+  sanctionNote = null,
+}) {
+  const isWarn = action === 'warn';
+  const embed = new EmbedBuilder()
+    .setColor(isWarn ? (activeCount >= 3 ? 0xed4245 : 0xfee75c) : 0x57f287)
+    .setTitle(
+      isWarn
+        ? `⚠️ Выдан варн #${warn.id} (${activeCount}/3)`
+        : `✅ Снят варн #${warn.id} (осталось активных: ${activeCount})`,
+    )
+    .addFields(
+      { name: '👤 Игрок', value: `<@${targetUserId}>`, inline: true },
+      { name: '🛡️ Модератор', value: `<@${moderatorId}>`, inline: true },
+      {
+        name: isWarn ? '💬 Причина варна' : '💬 Причина снятия',
+        value: (isWarn ? warn.reason : warn.unwarn_reason || warn.reason) || '*не указана*',
+        inline: false,
+      },
+    )
+    .setTimestamp(new Date());
+
+  if (warn.expires_at && isWarn) {
+    const unix = Math.floor(new Date(warn.expires_at).getTime() / 1000);
+    embed.addFields({ name: '⏳ Срок действия', value: `<t:${unix}:f> (<t:${unix}:R>)`, inline: true });
+  }
+
+  if (sanctionNote) {
+    embed.addFields({ name: '🚨 Санкции', value: sanctionNote, inline: false });
+  }
+
+  return embed;
+}
+
+export async function sendWarnLog({
+  guild,
+  server,
+  client,
+  action = 'warn',
+  warn,
+  moderatorId,
+  targetUserId,
+  activeCount,
+  sanctionNote,
+}) {
+  try {
+    const logChannel = await getOrCreateTicketLogChannel(guild, server, client);
+    if (!logChannel) return null;
+
+    const embed = buildWarnLogEmbed({
+      action,
+      warn,
+      moderatorId,
+      targetUserId,
+      activeCount,
+      sanctionNote,
+    });
+
+    return await logChannel.send({ embeds: [embed] });
+  } catch (error) {
+    console.error('Ошибка отправки лога варна:', error);
     return null;
   }
 }

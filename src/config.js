@@ -20,6 +20,9 @@ export const config = {
   database: {
     url: required('DATABASE_URL'),
   },
+  steam: {
+    apiKey: process.env.STEAM_API_KEY?.trim() || null,
+  },
   ai: {
     baseUrl: (process.env.RIVER_BASE_URL?.trim() || 'https://api.river.ai/v1').replace(/\/$/, ''),
     apiKey: required('RIVER_API_KEY'),
