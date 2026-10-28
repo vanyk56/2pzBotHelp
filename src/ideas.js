@@ -35,6 +35,35 @@ export const IDEAS_COMMANDS = [
           },
         ],
       },
+      {
+        name: 'decide',
+        description: 'Принять решение по идее (внутри её ветки или указав ID)',
+        type: ApplicationCommandOptionType.Subcommand,
+        options: [
+          {
+            name: 'status',
+            description: 'Решение по идее',
+            type: ApplicationCommandOptionType.String,
+            required: true,
+            choices: [
+              { name: '✅ Одобрить идею', value: 'accepted' },
+              { name: '❌ Отклонить идею', value: 'rejected' },
+            ],
+          },
+          {
+            name: 'reason',
+            description: 'Причина или комментарий администрации (будет отправлен автору и в ветку)',
+            type: ApplicationCommandOptionType.String,
+            required: false,
+          },
+          {
+            name: 'idea_id',
+            description: 'ID идеи (необязательно, если команда вызвана внутри ветки идеи)',
+            type: ApplicationCommandOptionType.Integer,
+            required: false,
+          },
+        ],
+      },
     ],
   },
 ];
@@ -42,6 +71,8 @@ export const IDEAS_COMMANDS = [
 export const IDEA_OPEN_MODAL_ID = 'idea:open_modal';
 export const IDEA_SUBMIT_MODAL_ID = 'idea:submit_modal';
 export const IDEA_VOTE_PREFIX = 'idea:vote:';
+export const IDEA_DECIDE_PREFIX = 'idea:decide:';
+export const IDEA_DECIDE_MODAL_PREFIX = 'idea:modal_decide:';
 
 export function buildIdeasPanelPayload() {
   const embed = new EmbedBuilder()
@@ -120,9 +151,105 @@ export function buildIdeaMessagePayload({ idea, yesCount = 0, noCount = 0, guild
   };
 }
 
+export function buildIdeaThreadDecideRow(ideaId) {
+  const acceptBtn = new ButtonBuilder()
+    .setCustomId(`${IDEA_DECIDE_PREFIX}accepted:${ideaId}`)
+    .setLabel('Одобрить')
+    .setEmoji('✅')
+    .setStyle(ButtonStyle.Success);
+
+  const rejectBtn = new ButtonBuilder()
+    .setCustomId(`${IDEA_DECIDE_PREFIX}rejected:${ideaId}`)
+    .setLabel('Отклонить')
+    .setEmoji('❌')
+    .setStyle(ButtonStyle.Danger);
+
+  return new ActionRowBuilder().addComponents(acceptBtn, rejectBtn);
+}
+
+export function buildIdeaDecisionModal(status, ideaId) {
+  const isAccepted = status === 'accepted';
+  const noteInput = new TextInputBuilder()
+    .setCustomId('decision_note')
+    .setLabel(isAccepted ? 'Комментарий (необязательно)' : 'Причина отклонения (необязательно)')
+    .setPlaceholder(
+      isAccepted
+        ? 'Например: Будет добавлено в ближайшем обновлении или принято в план...'
+        : 'Например: Не подходит для текущего формата клана или отклонено голосованием...',
+    )
+    .setStyle(TextInputStyle.Paragraph)
+    .setRequired(false)
+    .setMaxLength(1000);
+
+  return new ModalBuilder()
+    .setCustomId(`${IDEA_DECIDE_MODAL_PREFIX}${status}:${ideaId}`)
+    .setTitle(isAccepted ? 'Одобрить идею' : 'Отклонить идею')
+    .addComponents(new ActionRowBuilder().addComponents(noteInput));
+}
+
+export function buildDecidedIdeaMessagePayload({
+  idea,
+  status,
+  decidedBy,
+  decisionNote = null,
+  counts = { yes: 0, no: 0 },
+  guildName = '2pz',
+}) {
+  const isAccepted = status === 'accepted';
+  const embed = new EmbedBuilder()
+    .setColor(isAccepted ? 0x57f287 : 0xed4245)
+    .setTitle(`${isAccepted ? '🟢 ОДОБРЕНО' : '🔴 ОТКЛОНЕНО'}: ${idea.title}`)
+    .setDescription(idea.content)
+    .addFields(
+      { name: '👤 Автор', value: `<@${idea.user_id}>`, inline: true },
+      { name: '🛡️ Статус', value: isAccepted ? '✅ **Одобрено**' : '❌ **Отклонено**', inline: true },
+      { name: '⚖️ Решение принял', value: `<@${decidedBy}>`, inline: true },
+    );
+
+  if (decisionNote) {
+    embed.addFields({
+      name: isAccepted ? '💬 Комментарий' : '📋 Причина',
+      value: decisionNote,
+      inline: false,
+    });
+  }
+
+  embed.addFields({
+    name: '📊 Итоги голосования',
+    value: `✅ **${counts.yes}** за • ❌ **${counts.no}** против`,
+    inline: false,
+  });
+
+  embed
+    .setFooter({
+      text: `Идея #${idea.id} | ${isAccepted ? 'Одобрена' : 'Отклонена'} | ${guildName}`,
+    })
+    .setTimestamp(new Date(idea.created_at || Date.now()));
+
+  const yesBtn = new ButtonBuilder()
+    .setCustomId(`${IDEA_VOTE_PREFIX}yes:${idea.id}`)
+    .setLabel(String(counts.yes))
+    .setEmoji('✅')
+    .setStyle(ButtonStyle.Secondary)
+    .setDisabled(true);
+
+  const noBtn = new ButtonBuilder()
+    .setCustomId(`${IDEA_VOTE_PREFIX}no:${idea.id}`)
+    .setLabel(String(counts.no))
+    .setEmoji('❌')
+    .setStyle(ButtonStyle.Secondary)
+    .setDisabled(true);
+
+  return {
+    embeds: [embed],
+    components: [new ActionRowBuilder().addComponents(yesBtn, noBtn)],
+  };
+}
+
 export function createIdeasManager({ db, client, servers }) {
   const isStaff = (member, server) => {
     if (!server) return false;
+    if (member?.permissions?.has && member.permissions.has('Administrator')) return true;
     const roles = Array.isArray(member?.roles)
       ? member.roles
       : [...(member?.roles?.cache?.keys() ?? [])];
@@ -133,6 +260,129 @@ export function createIdeasManager({ db, client, servers }) {
 
   const replyEphemeral = (interaction, content) =>
     interaction.reply({ content, flags: MessageFlags.Ephemeral });
+
+  async function applyIdeaDecision({
+    interaction,
+    ideaId,
+    status,
+    decisionNote = null,
+    server,
+  }) {
+    if (!interaction.deferred && !interaction.replied) {
+      await interaction.deferReply({ flags: MessageFlags.Ephemeral });
+    }
+
+    const idea = await db.getIdea(ideaId);
+    if (!idea) {
+      return interaction.editReply('❌ Идея не найдена в базе данных.');
+    }
+
+    if (idea.status !== 'open') {
+      const current = idea.status === 'accepted' ? 'одобрена' : 'отклонена';
+      return interaction.editReply(`⚠️ По этой идее уже вынесено решение: идея **${current}**.`);
+    }
+
+    await db.setIdeaStatus(idea.id, status, interaction.user.id, decisionNote || null);
+    const counts = await db.getIdeaVotesCount(idea.id);
+
+    // 1. Обновляем главное сообщение в канале идей
+    try {
+      const channel = await client.channels.fetch(idea.channel_id).catch(() => null);
+      if (channel && idea.message_id) {
+        const msg = await channel.messages.fetch(idea.message_id).catch(() => null);
+        if (msg) {
+          const payload = buildDecidedIdeaMessagePayload({
+            idea,
+            status,
+            decidedBy: interaction.user.id,
+            decisionNote,
+            counts,
+            guildName: interaction.guild?.name || '2pz',
+          });
+          await msg.edit(payload).catch(() => {});
+        }
+      }
+    } catch (err) {
+      console.warn('Не удалось обновить главное сообщение идеи:', err.message);
+    }
+
+    // 2. Публикуем вердикт в ветке обсуждения, затем блокируем и архивируем её
+    if (idea.thread_id) {
+      try {
+        const thread = await client.channels.fetch(idea.thread_id).catch(() => null);
+        if (thread) {
+          const isAccepted = status === 'accepted';
+          const threadEmbed = new EmbedBuilder()
+            .setColor(isAccepted ? 0x57f287 : 0xed4245)
+            .setTitle(isAccepted ? '✅ Идея официально одобрена!' : '❌ Идея официально отклонена')
+            .setDescription(
+              isAccepted
+                ? `Администрация одобрила данное предложение! Спасибо за вклад в развитие клана.`
+                : `Администрация рассмотрела данное предложение и приняла решение отклонить его.`,
+            )
+            .addFields(
+              { name: '⚖️ Решение принял', value: `<@${interaction.user.id}>`, inline: true },
+              { name: '📊 Итоги голосования', value: `✅ ${counts.yes} • ❌ ${counts.no}`, inline: true },
+            );
+
+          if (decisionNote) {
+            threadEmbed.addFields({
+              name: isAccepted ? '💬 Комментарий' : '📋 Причина',
+              value: decisionNote,
+              inline: false,
+            });
+          }
+
+          threadEmbed.setFooter({ text: 'Ветка закрыта и заблокирована от новых сообщений.' });
+
+          await thread.send({ embeds: [threadEmbed] }).catch(() => {});
+          if (typeof thread.setLocked === 'function') {
+            await thread.setLocked(true).catch(() => {});
+          }
+          if (typeof thread.setArchived === 'function') {
+            await thread.setArchived(true).catch(() => {});
+          }
+        }
+      } catch (err) {
+        console.warn('Не удалось закрыть ветку идеи:', err.message);
+      }
+    }
+
+    // 3. Отправляем уведомление автору идеи в ЛС
+    try {
+      const author = await client.users.fetch(idea.user_id).catch(() => null);
+      if (author) {
+        const isAccepted = status === 'accepted';
+        const authorEmbed = new EmbedBuilder()
+          .setColor(isAccepted ? 0x57f287 : 0xed4245)
+          .setTitle(isAccepted ? '✅ Ваша идея была одобрена!' : '❌ Ваша идея была отклонена')
+          .setDescription(
+            `Ваша идея **«${idea.title}»** на сервере **${interaction.guild?.name || '2pz'}** была рассмотрена модерацией.`,
+          )
+          .addFields(
+            { name: '⚖️ Статус', value: isAccepted ? '✅ Одобрено' : '❌ Отклонено', inline: true },
+            { name: '🛡️ Модератор', value: `<@${interaction.user.id}>`, inline: true },
+          );
+
+        if (decisionNote) {
+          authorEmbed.addFields({
+            name: isAccepted ? '💬 Комментарий' : '📋 Причина',
+            value: decisionNote,
+            inline: false,
+          });
+        }
+
+        await author.send({ embeds: [authorEmbed] }).catch(() => {});
+      }
+    } catch (err) {
+      console.warn('Не удалось отправить ЛС автору идеи:', err.message);
+    }
+
+    const verdictLabel = status === 'accepted' ? 'одобрена' : 'отклонена';
+    return interaction.editReply(
+      `✅ Решение вынесено: идея #${idea.id} («${idea.title}») успешно **${verdictLabel}**! Голосование завершено, ветка закрыта, автор получил уведомление в ЛС.`,
+    );
+  }
 
   async function handleCommand(interaction, server) {
     if (!isStaff(interaction.member, server)) {
@@ -154,6 +404,34 @@ export function createIdeasManager({ db, client, servers }) {
         interaction,
         `Канал для публикации идей успешно установлен на <#${targetChannel.id}>! Теперь новые идеи будут появляться там с веткой для обсуждения.`,
       );
+    }
+
+    if (sub === 'decide') {
+      const status = interaction.options.getString('status', true);
+      const reason = interaction.options.getString('reason')?.trim() || null;
+      let ideaId = interaction.options.getInteger('idea_id');
+
+      if (!ideaId) {
+        const found = await db.findIdeaByThread(interaction.channelId).catch(() => null);
+        if (found) {
+          ideaId = found.id;
+        }
+      }
+
+      if (!ideaId) {
+        return replyEphemeral(
+          interaction,
+          '⚠️ Не удалось определить идею. Если вы вызываете команду не внутри ветки идеи, укажите параметр `idea_id` (например: `/ideas decide status:accepted idea_id:1`).',
+        );
+      }
+
+      return applyIdeaDecision({
+        interaction,
+        ideaId,
+        status,
+        decisionNote: reason,
+        server,
+      });
     }
   }
 
@@ -209,8 +487,11 @@ export function createIdeasManager({ db, client, servers }) {
           autoArchiveDuration: 1440,
         });
 
+        const decideRow = buildIdeaThreadDecideRow(idea.id);
+
         await thread.send({
-          content: `👋 В этой ветке можно обсудить идею **«${title}»** от <@${interaction.user.id}> и предложить свои мысли!`,
+          content: `👋 В этой ветке можно обсудить идею **«${title}»** от <@${interaction.user.id}> и предложить свои мысли!\n\n🛡️ **Для модерации:** Когда решите судьбу идеи, нажмите кнопку ниже или используйте \`/ideas decide\`:`,
+          components: [decideRow],
         });
       }
     } catch (err) {
@@ -235,6 +516,14 @@ export function createIdeasManager({ db, client, servers }) {
     const idea = await db.getIdea(ideaId);
     if (!idea) {
       return replyEphemeral(interaction, 'Идея не найдена или была удалена.');
+    }
+
+    if (idea.status !== 'open') {
+      const current = idea.status === 'accepted' ? 'одобрена' : 'отклонена';
+      return replyEphemeral(
+        interaction,
+        `⚠️ Голосование по этой идее уже завершено (идея **${current}**).`,
+      );
     }
 
     const res = await db.voteIdea(ideaId, interaction.user.id, voteType);
@@ -267,6 +556,51 @@ export function createIdeasManager({ db, client, servers }) {
     return replyEphemeral(interaction, 'Вы отменили свой голос.');
   }
 
+  async function handleDecideButton(interaction, server) {
+    if (!isStaff(interaction.member, server)) {
+      return replyEphemeral(interaction, '⚠️ Принятие решения по идеям доступно только модерации клана.');
+    }
+
+    const match = interaction.customId.slice(IDEA_DECIDE_PREFIX.length).match(/^(accepted|rejected):(\d+)$/);
+    if (!match) return;
+
+    const [, status, ideaIdStr] = match;
+    const ideaId = Number(ideaIdStr);
+
+    const idea = await db.getIdea(ideaId);
+    if (!idea) {
+      return replyEphemeral(interaction, '❌ Идея не найдена в базе данных.');
+    }
+
+    if (idea.status !== 'open') {
+      const current = idea.status === 'accepted' ? 'одобрена' : 'отклонена';
+      return replyEphemeral(interaction, `⚠️ По этой идее уже вынесено решение: идея **${current}**.`);
+    }
+
+    return interaction.showModal(buildIdeaDecisionModal(status, ideaId));
+  }
+
+  async function handleDecideModalSubmit(interaction, server) {
+    if (!isStaff(interaction.member, server)) {
+      return replyEphemeral(interaction, '⚠️ Принятие решения по идеям доступно только модерации клана.');
+    }
+
+    const match = interaction.customId.slice(IDEA_DECIDE_MODAL_PREFIX.length).match(/^(accepted|rejected):(\d+)$/);
+    if (!match) return;
+
+    const [, status, ideaIdStr] = match;
+    const ideaId = Number(ideaIdStr);
+    const note = interaction.fields.getTextInputValue('decision_note')?.trim() || null;
+
+    return applyIdeaDecision({
+      interaction,
+      ideaId,
+      status,
+      decisionNote: note,
+      server,
+    });
+  }
+
   return {
     async handleInteraction(interaction) {
       const server = serverByGuild.get(interaction.guildId);
@@ -289,11 +623,19 @@ export function createIdeasManager({ db, client, servers }) {
           await handleVote(interaction);
           return true;
         }
+        if (interaction.customId.startsWith(IDEA_DECIDE_PREFIX)) {
+          await handleDecideButton(interaction, server);
+          return true;
+        }
       }
 
       if (interaction.isModalSubmit()) {
         if (interaction.customId === IDEA_SUBMIT_MODAL_ID) {
           await handleSubmitModal(interaction, server);
+          return true;
+        }
+        if (interaction.customId.startsWith(IDEA_DECIDE_MODAL_PREFIX)) {
+          await handleDecideModalSubmit(interaction, server);
           return true;
         }
       }

@@ -137,8 +137,16 @@ CREATE TABLE IF NOT EXISTS ideas (
   title         TEXT        NOT NULL,
   content       TEXT        NOT NULL,
   status        TEXT        NOT NULL DEFAULT 'open',
+  decided_by    TEXT,
+  decision_note TEXT,
+  decided_at    TIMESTAMPTZ,
   created_at    TIMESTAMPTZ NOT NULL DEFAULT now()
 );
+
+ALTER TABLE ideas ADD COLUMN IF NOT EXISTS decided_by TEXT;
+ALTER TABLE ideas ADD COLUMN IF NOT EXISTS decision_note TEXT;
+ALTER TABLE ideas ADD COLUMN IF NOT EXISTS decided_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS ideas_thread_id_idx ON ideas (thread_id);
 
 CREATE TABLE IF NOT EXISTS idea_votes (
   idea_id       BIGINT      NOT NULL REFERENCES ideas (id) ON DELETE CASCADE,
@@ -514,6 +522,22 @@ export function createDb(connectionString) {
 
     async getIdea(ideaId) {
       const { rows } = await pool.query('SELECT * FROM ideas WHERE id = $1', [ideaId]);
+      return rows[0] ?? null;
+    },
+
+    async findIdeaByThread(threadId) {
+      const { rows } = await pool.query('SELECT * FROM ideas WHERE thread_id = $1 LIMIT 1', [threadId]);
+      return rows[0] ?? null;
+    },
+
+    async setIdeaStatus(ideaId, status, decidedBy = null, decisionNote = null) {
+      const { rows } = await pool.query(
+        `UPDATE ideas
+         SET status = $2, decided_by = $3, decision_note = $4, decided_at = now()
+         WHERE id = $1
+         RETURNING *`,
+        [ideaId, status, decidedBy, decisionNote],
+      );
       return rows[0] ?? null;
     },
 
