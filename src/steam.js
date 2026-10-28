@@ -122,6 +122,8 @@ export async function checkSteamAccount(input, apiKey, fetchFn = fetch) {
     const warnings = [];
     if (!isPublic) {
       warnings.push('🔒 Профиль скрыт настройками приватности (нельзя проверить игры и инвентарь)');
+    } else if (rustHours === null) {
+      warnings.push('🔒 Игровая информация и часы скрыты настройками приватности');
     }
     if (vacBanned) {
       warnings.push(`🚨 Обнаружен VAC-бан (${vacBansCount} шт., последний ${daysSinceLastBan} дн. назад)`);
