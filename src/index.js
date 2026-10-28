@@ -90,6 +90,8 @@ client.once(Events.ClientReady, async (readyClient) => {
   await bot.cleanupOrphanTickets();
   // Восстановление прав пользователей на отправку сообщений в открытых тикетах
   await bot.ensureOpenTicketPermissions();
+  // Настройка прав каналов и веток идей для свободного обсуждения участниками
+  await ideasManager.ensureAllIdeaPermissions();
 
   console.log(`Бот ${readyClient.user.tag} запущен`);
 });

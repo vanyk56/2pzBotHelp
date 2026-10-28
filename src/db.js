@@ -581,6 +581,18 @@ export function createDb(connectionString) {
       return rows[0] ?? null;
     },
 
+    async getAllIdeaSettings() {
+      const { rows } = await pool.query('SELECT * FROM idea_settings');
+      return rows;
+    },
+
+    async findOpenIdeas() {
+      const { rows } = await pool.query(
+        "SELECT * FROM ideas WHERE status = 'open' AND thread_id IS NOT NULL",
+      );
+      return rows;
+    },
+
     async setIdeaSettings(guildId, { ideasChannelId }) {
       await pool.query(
         `INSERT INTO idea_settings (guild_id, ideas_channel_id, updated_at)

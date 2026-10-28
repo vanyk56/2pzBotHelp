@@ -7,6 +7,7 @@ import {
   EmbedBuilder,
   MessageFlags,
   ModalBuilder,
+  PermissionFlagsBits,
   TextInputBuilder,
   TextInputStyle,
 } from 'discord.js';
@@ -268,6 +269,98 @@ export function createIdeasManager({ db, client, servers }) {
   const replyEphemeral = (interaction, content) =>
     interaction.reply({ content, flags: MessageFlags.Ephemeral });
 
+  async function ensureIdeasChannelPermissions(channel, server = null) {
+    if (!channel || !channel.permissionOverwrites) return;
+    const everyoneRole = channel.guild?.roles?.everyone;
+    if (!everyoneRole) return;
+
+    try {
+      await channel.permissionOverwrites.create(
+        everyoneRole.id,
+        {
+          ViewChannel: true,
+          ReadMessageHistory: true,
+          SendMessages: false,
+          SendMessagesInThreads: true,
+          CreatePublicThreads: false,
+          CreatePrivateThreads: false,
+          AttachFiles: true,
+          EmbedLinks: true,
+          AddReactions: true,
+          UseExternalEmojis: true,
+        },
+        { reason: 'Настройка прав канала идей: участники могут писать в ветках' },
+      );
+
+      if (server?.staffRoleIds?.length > 0) {
+        for (const roleId of server.staffRoleIds) {
+          await channel.permissionOverwrites.create(
+            roleId,
+            {
+              ViewChannel: true,
+              ReadMessageHistory: true,
+              SendMessages: true,
+              SendMessagesInThreads: true,
+              ManageMessages: true,
+              ManageThreads: true,
+              AttachFiles: true,
+              EmbedLinks: true,
+              AddReactions: true,
+              UseExternalEmojis: true,
+            },
+            { reason: 'Права модерации для канала идей' },
+          ).catch(() => {});
+        }
+      }
+      console.log(`Права на канал идей «${channel.name}» успешно настроены: участники могут писать в ветках.`);
+    } catch (err) {
+      console.warn(`Не удалось обновить права канала идей «${channel.name}»:`, err.message);
+    }
+  }
+
+  async function ensureAllIdeaPermissions() {
+    try {
+      const allSettings = (await db.getAllIdeaSettings?.().catch(() => [])) || [];
+      const channelIds = new Set();
+      for (const row of allSettings) {
+        if (row.ideas_channel_id) channelIds.add(row.ideas_channel_id);
+      }
+      for (const s of servers) {
+        if (s.ideasChannelId) channelIds.add(s.ideasChannelId);
+      }
+
+      for (const channelId of channelIds) {
+        const channel = await client.channels.fetch(channelId).catch(() => null);
+        if (channel) {
+          const server = serverByGuild.get(channel.guild?.id);
+          await ensureIdeasChannelPermissions(channel, server);
+        }
+      }
+
+      const openIdeas = (await db.findOpenIdeas?.().catch(() => [])) || [];
+      for (const idea of openIdeas) {
+        if (!idea.thread_id) continue;
+        const thread = await client.channels.fetch(idea.thread_id).catch(() => null);
+        if (!thread || thread.locked || thread.archived) continue;
+
+        if (idea.user_id && thread.members?.add) {
+          await thread.members.add(idea.user_id).catch(() => {});
+        }
+
+        const parent =
+          thread.parent ??
+          (thread.parentId ? await thread.guild?.channels?.fetch(thread.parentId).catch(() => null) : null);
+        if (parent && !channelIds.has(parent.id)) {
+          channelIds.add(parent.id);
+          const server = serverByGuild.get(parent.guild?.id);
+          await ensureIdeasChannelPermissions(parent, server);
+        }
+      }
+    } catch (err) {
+      console.warn('Ошибка при проверке прав каналов и веток идей:', err.message);
+    }
+  }
+
   async function applyIdeaDecision({
     interaction,
     ideaId,
@@ -407,9 +500,10 @@ export function createIdeasManager({ db, client, servers }) {
     if (sub === 'set-channel') {
       const targetChannel = interaction.options.getChannel('channel', true);
       await db.setIdeaSettings(interaction.guildId, { ideasChannelId: targetChannel.id });
+      await ensureIdeasChannelPermissions(targetChannel, server);
       return replyEphemeral(
         interaction,
-        `Канал для публикации идей успешно установлен на <#${targetChannel.id}>! Теперь новые идеи будут появляться там с веткой для обсуждения.`,
+        `Канал для публикации идей успешно установлен на <#${targetChannel.id}>! Права настроены: участники могут свободно обсуждать идеи в ветках.`,
       );
     }
 
@@ -488,11 +582,19 @@ export function createIdeasManager({ db, client, servers }) {
     // Создаём ветку (thread) под сообщением идеи для обсуждений соклановцами
     let thread = null;
     try {
+      // Убеждаемся, что права на канал настроены, чтобы участники могли писать в ветках
+      await ensureIdeasChannelPermissions(targetChannel, server);
+
       if (typeof ideaMessage.startThread === 'function') {
         thread = await ideaMessage.startThread({
           name: `💡・${title.slice(0, 80)}`,
           autoArchiveDuration: 1440,
         });
+
+        // Добавляем автора идеи в созданную ветку
+        await thread.members.add(interaction.user.id).catch((err) =>
+          console.warn('Не удалось добавить автора идеи в ветку:', err.message),
+        );
 
         const decideRow = buildIdeaThreadDecideRow(idea.id);
 
@@ -649,5 +751,7 @@ export function createIdeasManager({ db, client, servers }) {
 
       return false;
     },
+    ensureAllIdeaPermissions,
+    ensureIdeasChannelPermissions,
   };
 }

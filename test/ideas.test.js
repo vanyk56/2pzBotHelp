@@ -138,3 +138,112 @@ test('buildDecidedIdeaMessagePayload строит плашку с вердикт
   assert.equal(btns[0].label, '12');
   assert.equal(btns[1].label, '2');
 });
+
+test('createIdeasManager экспортирует функции ensureIdeasChannelPermissions и ensureAllIdeaPermissions', async () => {
+  const { createIdeasManager } = await import('../src/ideas.js');
+  const mgr = createIdeasManager({
+    db: {},
+    client: {},
+    servers: [],
+  });
+
+  assert.equal(typeof mgr.ensureIdeasChannelPermissions, 'function');
+  assert.equal(typeof mgr.ensureAllIdeaPermissions, 'function');
+});
+
+test('ensureIdeasChannelPermissions выдает SendMessagesInThreads для @everyone и запрещает SendMessages в корне', async () => {
+  const { createIdeasManager } = await import('../src/ideas.js');
+  let createdOverwrite = null;
+
+  const fakeChannel = {
+    name: '💡-idea',
+    guild: {
+      roles: {
+        everyone: { id: 'everyone-role-id' },
+      },
+    },
+    permissionOverwrites: {
+      create: async (targetId, perms, options) => {
+        createdOverwrite = { targetId, perms, options };
+      },
+    },
+  };
+
+  const mgr = createIdeasManager({
+    db: {},
+    client: {},
+    servers: [],
+  });
+
+  await mgr.ensureIdeasChannelPermissions(fakeChannel);
+
+  assert.ok(createdOverwrite);
+  assert.equal(createdOverwrite.targetId, 'everyone-role-id');
+  assert.equal(createdOverwrite.perms.SendMessagesInThreads, true);
+  assert.equal(createdOverwrite.perms.SendMessages, false);
+  assert.equal(createdOverwrite.perms.AttachFiles, true);
+  assert.equal(createdOverwrite.perms.EmbedLinks, true);
+  assert.equal(createdOverwrite.perms.AddReactions, true);
+  assert.equal(createdOverwrite.perms.ViewChannel, true);
+});
+
+test('ensureAllIdeaPermissions добавляет автора идеи в ветку и обновляет канал', async () => {
+  const { createIdeasManager } = await import('../src/ideas.js');
+  let addedMember = null;
+  let channelConfigured = false;
+
+  const fakeParent = {
+    id: 'parent-channel-1',
+    name: '💡-idea',
+    guild: {
+      roles: {
+        everyone: { id: 'everyone-role-id' },
+      },
+    },
+    permissionOverwrites: {
+      create: async () => {
+        channelConfigured = true;
+      },
+    },
+  };
+
+  const fakeThread = {
+    id: 'thread-555',
+    parent: fakeParent,
+    locked: false,
+    archived: false,
+    members: {
+      add: async (userId) => {
+        addedMember = userId;
+      },
+    },
+  };
+
+  const fakeDb = {
+    getAllIdeaSettings: async () => [{ ideas_channel_id: 'parent-channel-1' }],
+    findOpenIdeas: async () => [
+      { id: 1, thread_id: 'thread-555', user_id: 'author-333' },
+    ],
+  };
+
+  const fakeClient = {
+    channels: {
+      fetch: async (id) => {
+        if (id === 'parent-channel-1') return fakeParent;
+        if (id === 'thread-555') return fakeThread;
+        return null;
+      },
+    },
+  };
+
+  const mgr = createIdeasManager({
+    db: fakeDb,
+    client: fakeClient,
+    servers: [],
+  });
+
+  await mgr.ensureAllIdeaPermissions();
+
+  assert.equal(addedMember, 'author-333');
+  assert.equal(channelConfigured, true);
+});
