@@ -107,7 +107,12 @@ const CLOSING_DECISIONS = {
 const ACTIVE_PERMS = [
   PermissionFlagsBits.ViewChannel,
   PermissionFlagsBits.SendMessages,
+  PermissionFlagsBits.SendMessagesInThreads,
   PermissionFlagsBits.ReadMessageHistory,
+  PermissionFlagsBits.AttachFiles,
+  PermissionFlagsBits.EmbedLinks,
+  PermissionFlagsBits.AddReactions,
+  PermissionFlagsBits.UseExternalEmojis,
 ];
 
 // Ответы первого окна, пока игрок не открыл следующее: ключ «пользователь:тип»
@@ -388,10 +393,81 @@ export function createTicketBot({ client, db, ai, servers, contextMessages, stea
         const channel = await client.channels.fetch(t.channel_id).catch(() => null);
         if (!channel || channel.deleted) {
           await db.setStatus(t.channel_id, 'closed', 'orphan_cleanup');
+          const server = serverByGuild.get(t.guild_id);
+          if (server?.panelChannelId) {
+            const panel = await client.channels.fetch(server.panelChannelId).catch(() => null);
+            if (panel?.permissionOverwrites && t.user_id) {
+              await panel.permissionOverwrites
+                .delete(t.user_id, 'Очистка зависшего тикета')
+                .catch(() => {});
+            }
+          }
         }
       }
     } catch (err) {
       console.warn('Ошибка очистки зависших тикетов:', err.message);
+    }
+  }
+
+  // Проверяет открытые тикеты при запуске и восстанавливает права писать авторам тикетов
+  async function ensureOpenTicketPermissions() {
+    try {
+      const openTickets = await db.findOpenTickets();
+      if (!openTickets || openTickets.length === 0) return;
+
+      console.log(`Проверка прав для открытых тикетов (${openTickets.length} шт.)...`);
+      for (const t of openTickets) {
+        const channel = await client.channels.fetch(t.channel_id).catch(() => null);
+        if (!channel || channel.deleted) continue;
+
+        if (channel.isThread?.()) {
+          const parent =
+            channel.parent ??
+            (channel.parentId ? await channel.guild?.channels?.fetch(channel.parentId).catch(() => null) : null);
+          if (parent?.permissionOverwrites && t.user_id) {
+            await parent.permissionOverwrites
+              .create(
+                t.user_id,
+                {
+                  ViewChannel: true,
+                  ReadMessageHistory: true,
+                  SendMessagesInThreads: true,
+                  AttachFiles: true,
+                  EmbedLinks: true,
+                  AddReactions: true,
+                  UseExternalEmojis: true,
+                },
+                { reason: `Восстановление прав для открытого тикета #${t.id}` },
+              )
+              .catch((err) =>
+                console.warn(`Не удалось восстановить оверрайт прав для тикета #${t.id}:`, err.message),
+              );
+          }
+          await channel.members.add(t.user_id).catch(() => {});
+        } else if (channel.permissionOverwrites && t.user_id) {
+          await channel.permissionOverwrites
+            .create(
+              t.user_id,
+              {
+                ViewChannel: true,
+                SendMessages: true,
+                SendMessagesInThreads: true,
+                ReadMessageHistory: true,
+                AttachFiles: true,
+                EmbedLinks: true,
+                AddReactions: true,
+                UseExternalEmojis: true,
+              },
+              { reason: `Восстановление прав для открытого тикета #${t.id}` },
+            )
+            .catch((err) =>
+              console.warn(`Не удалось обновить права для канала тикета #${t.id}:`, err.message),
+            );
+        }
+      }
+      console.log('Права для всех открытых тикетов успешно проверены и обновлены.');
+    } catch (err) {
+      console.warn('Ошибка при проверке прав открытых тикетов:', err.message);
     }
   }
 
@@ -480,6 +556,27 @@ export function createTicketBot({ client, db, ai, servers, contextMessages, stea
         (server.panelChannelId ? await guild.channels.fetch(server.panelChannelId).catch(() => null) : null);
 
       if (panelChannel && typeof panelChannel.threads?.create === 'function') {
+        // Даём автору тикета права писать и прикреплять файлы в ветках канала панели заявок
+        if (panelChannel.permissionOverwrites) {
+          await panelChannel.permissionOverwrites
+            .create(
+              user.id,
+              {
+                ViewChannel: true,
+                ReadMessageHistory: true,
+                SendMessagesInThreads: true,
+                AttachFiles: true,
+                EmbedLinks: true,
+                AddReactions: true,
+                UseExternalEmojis: true,
+              },
+              { reason: `Права для тикета ${user.username}` },
+            )
+            .catch((err) =>
+              console.warn('Не удалось выдать права игроку на ветки тикета:', err.message),
+            );
+        }
+
         channel = await panelChannel.threads.create({
           name: threadName,
           type: ChannelType.PrivateThread,
@@ -667,8 +764,17 @@ export function createTicketBot({ client, db, ai, servers, contextMessages, stea
     setTimeout(async () => {
       try {
         if (interaction.channel?.isThread?.()) {
-          await interaction.channel.setLocked(true, 'Тикет закрыт').catch(() => {});
-          await interaction.channel.setArchived(true, 'Тикет закрыт').catch(() => {});
+          const thread = interaction.channel;
+          const parent =
+            thread.parent ??
+            (thread.parentId ? await thread.guild?.channels?.fetch(thread.parentId).catch(() => null) : null);
+          if (parent?.permissionOverwrites && ticket?.user_id) {
+            await parent.permissionOverwrites
+              .delete(ticket.user_id, 'Тикет закрыт')
+              .catch((err) => console.warn('Не удалось удалить оверрайт прав тикета:', err.message));
+          }
+          await thread.setLocked(true, 'Тикет закрыт').catch(() => {});
+          await thread.setArchived(true, 'Тикет закрыт').catch(() => {});
         } else {
           await interaction.channel
             ?.delete('Тикет закрыт')
@@ -1051,5 +1157,5 @@ export function createTicketBot({ client, db, ai, servers, contextMessages, stea
     enqueue(message.channelId, () => respond(message.channel, { fallback: REPLY_FALLBACK, skippable: true }));
   }
 
-  return { handleInteraction, handleMessage, cleanupOrphanTickets };
+  return { handleInteraction, handleMessage, cleanupOrphanTickets, ensureOpenTicketPermissions };
 }

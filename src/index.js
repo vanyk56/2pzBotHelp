@@ -88,6 +88,8 @@ client.once(Events.ClientReady, async (readyClient) => {
 
   // Очистка зависших тикетов, каналы которых были удалены в Discord
   await bot.cleanupOrphanTickets();
+  // Восстановление прав пользователей на отправку сообщений в открытых тикетах
+  await bot.ensureOpenTicketPermissions();
 
   console.log(`Бот ${readyClient.user.tag} запущен`);
 });
