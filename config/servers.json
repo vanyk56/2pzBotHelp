@@ -26,7 +26,7 @@
       "guildId": "1493084946749853777",
       "panelChannelId": "1561027943977984051",
       "panelKey": "secondary",
-      "types": ["caller", "media", "moderator", "warn"],
+      "types": ["caller", "media", "moderator", "warn", "report"],
       "ticketCategoryId": "1561029703794556958",
       "staffRoleIds": ["1493147074005307392", "1493147514440912956", "1493170228295766210"],
       "acceptedRoleId": null,

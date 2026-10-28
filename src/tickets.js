@@ -229,7 +229,12 @@ export function createTicketBot({ client, db, ai, servers, contextMessages }) {
       return button;
     });
 
-    return { embeds: [embed], components: [new ActionRowBuilder().addComponents(buttons)] };
+    const rows = [];
+    for (let i = 0; i < buttons.length; i += 5) {
+      rows.push(new ActionRowBuilder().addComponents(buttons.slice(i, i + 5)));
+    }
+
+    return { embeds: [embed], components: rows };
   }
 
   // Публикует панель сервера и снимает старые панели бота, чтобы в канале оставалась одна актуальная

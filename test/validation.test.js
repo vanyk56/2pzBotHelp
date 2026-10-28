@@ -7,6 +7,7 @@ const caller = findType('caller');
 const media = findType('media');
 const moderator = findType('moderator');
 const warn = findType('warn');
+const report = findType('report');
 
 const answersFrom = (type, values) =>
   type.fields.map((field) => ({ id: field.id, label: field.label, value: values[field.id] ?? '' }));
@@ -119,4 +120,33 @@ test('анкета обжалования варна валидируется к
     appeal_reason: 'Я полностью осознал свою ошибку, извинился перед сокланами и обещаю больше не нарушать регламент.',
   };
   assert.deepEqual(validateAnswers(answersFrom(warn, valid), warn), []);
+});
+
+test('анкета доноса на соклановца валидируется корректно', () => {
+  assert.ok(report);
+  assert.equal(report.id, 'report');
+  assert.equal(report.fields.length, 5);
+
+  const invalid = { name: '', target: '', violation_date: '', reason: '1' };
+  const labels = problemLabels(report, invalid);
+  assert.ok(labels.includes('Ваше имя / ник'));
+  assert.ok(labels.includes('Ник или Discord нарушителя'));
+  assert.ok(labels.includes('Когда это произошло?'));
+  assert.ok(labels.includes('Что произошло? (суть нарушения)'));
+  assert.equal(labels.includes('Доказательства (ссылки на фото/видео)'), false);
+
+  const validWithoutEvidence = {
+    name: 'Иван',
+    target: 'Gamer123',
+    violation_date: 'Сегодня в 19:00',
+    reason: 'Тимкилл на базе и воровство ресурсов из кланового сундука',
+    evidence: '',
+  };
+  assert.deepEqual(validateAnswers(answersFrom(report, validWithoutEvidence), report), []);
+
+  const validWithEvidence = {
+    ...validWithoutEvidence,
+    evidence: 'https://youtu.be/xyz123',
+  };
+  assert.deepEqual(validateAnswers(answersFrom(report, validWithEvidence), report), []);
 });

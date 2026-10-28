@@ -37,12 +37,45 @@ test('extractTicketDetails корректно работает с JSON стро�
     telegram: null,
     age: null,
     dailyOnline: null,
+    target: null,
+    violationDate: null,
     extraAnswers: [],
   });
 
   const jsonStr = JSON.stringify([{ id: 'name', value: 'Алексей' }]);
   const parsed = extractTicketDetails(jsonStr);
   assert.equal(parsed.name, 'Алексей');
+});
+
+test('buildTicketLogEmbed формирует правильный embed для доноса на соклановца', () => {
+  const ticket = {
+    id: 55,
+    user_id: '123456789012345678',
+    username: 'reporter_user',
+    channel_id: '987654321098765432',
+  };
+  const answers = [
+    { id: 'name', label: 'Ваше имя / ник', value: 'Денис' },
+    { id: 'target', label: 'Ник или Discord нарушителя', value: 'BadGuy#1234' },
+    { id: 'violation_date', label: 'Когда это произошло?', value: 'Сегодня в 19:30' },
+    { id: 'reason', label: 'Что произошло? (суть нарушения)', value: 'Тимкилл на фарме и забрал весь лут себе' },
+    { id: 'evidence', label: 'Доказательства (ссылки на фото/видео)', value: 'https://youtube.com/watch?v=123' },
+  ];
+
+  const embed = buildTicketLogEmbed({
+    action: 'created',
+    ticket,
+    type: { name: 'Донос на соклановца' },
+    answers,
+  }).toJSON();
+
+  assert.equal(embed.color, LOG_COLORS.created);
+  assert.equal(embed.title, '🎫 Новый тикет: Донос на соклановца');
+  assert.ok(embed.fields.some((f) => f.name === '📝 Имя' && f.value === 'Денис'));
+  assert.ok(embed.fields.some((f) => f.name === '🎯 Нарушитель' && f.value === 'BadGuy#1234'));
+  assert.ok(embed.fields.some((f) => f.name === '📅 Когда произошло' && f.value === 'Сегодня в 19:30'));
+  assert.ok(embed.fields.some((f) => f.name.includes('Что произошло') && f.value.includes('Тимкилл')));
+  assert.ok(embed.fields.some((f) => f.name.includes('Доказательства') && f.value.includes('https://youtube.com/watch?v=123')));
 });
 
 test('buildTicketLogEmbed формирует правильный embed для создания тикета', () => {

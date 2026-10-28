@@ -52,11 +52,22 @@ export function extractTicketDetails(answers) {
   const telegram = getVal(/^telegram$/, /telegram|тг/i);
   const age = getVal(/^age$/, /возраст|лет/i);
   const dailyOnline = getVal(/^daily_online$/, /онлайн/i);
+  const target = getVal(/^target$/, /нарушител/i);
+  const violationDate = getVal(/^violation_date$/, /когда/i);
 
-  const primaryIds = new Set(['name', 'hours', 'steam', 'telegram', 'age', 'daily_online']);
+  const primaryIds = new Set([
+    'name',
+    'hours',
+    'steam',
+    'telegram',
+    'age',
+    'daily_online',
+    'target',
+    'violation_date',
+  ]);
   const extraAnswers = list.filter((a) => !primaryIds.has(a.id) && a.value?.trim());
 
-  return { name, hours, steam, telegram, age, dailyOnline, extraAnswers };
+  return { name, hours, steam, telegram, age, dailyOnline, target, violationDate, extraAnswers };
 }
 
 export function buildTicketLogEmbed({
@@ -102,6 +113,12 @@ export function buildTicketLogEmbed({
   }
   if (details.dailyOnline) {
     embed.addFields({ name: '⚡ Онлайн/день', value: details.dailyOnline, inline: true });
+  }
+  if (details.target) {
+    embed.addFields({ name: '🎯 Нарушитель', value: details.target, inline: true });
+  }
+  if (details.violationDate) {
+    embed.addFields({ name: '📅 Когда произошло', value: details.violationDate, inline: true });
   }
 
   if (decidedBy) {

@@ -284,6 +284,62 @@
           "minWords": 3
         }
       ]
+    },
+    {
+      "id": "report",
+      "name": "Донос на соклановца",
+      "button": "Донос на соклановца",
+      "emoji": "🚨",
+      "channelPrefix": "тикет-донос",
+      "title": "Донос на соклановца",
+      "nextStep": "модераторы и руководство рассмотрят жалобу и ответят в этом канале",
+      "fields": [
+        {
+          "id": "name",
+          "label": "Ваше имя / ник",
+          "placeholder": "Как к вам обращаться",
+          "style": "short",
+          "required": true,
+          "minLength": 2,
+          "maxLength": 50
+        },
+        {
+          "id": "target",
+          "label": "Ник или Discord нарушителя",
+          "placeholder": "Ник соклановца или @username",
+          "style": "short",
+          "required": true,
+          "minLength": 2,
+          "maxLength": 100
+        },
+        {
+          "id": "violation_date",
+          "label": "Когда это произошло?",
+          "placeholder": "Дата и время (например: сегодня в 19:00)",
+          "style": "short",
+          "required": true,
+          "minLength": 3,
+          "maxLength": 100
+        },
+        {
+          "id": "reason",
+          "label": "Что произошло? (суть нарушения)",
+          "placeholder": "Подробно опишите ситуацию: тимкилл, кража лута, оскорбления и т.д.",
+          "style": "paragraph",
+          "required": true,
+          "minLength": 10,
+          "maxLength": 1000,
+          "minWords": 3
+        },
+        {
+          "id": "evidence",
+          "label": "Доказательства (ссылки на фото/видео)",
+          "placeholder": "Ссылки на YouTube, Imgur, Medal, скриншоты...",
+          "style": "short",
+          "required": false,
+          "maxLength": 500
+        }
+      ]
     }
   ]
 }
