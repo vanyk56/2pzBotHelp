@@ -418,10 +418,10 @@ export function createDb(connectionString) {
       );
     },
 
-    async addWarn({ guildId, userId, moderatorId, reason, durationDays = 7, expiresAt }) {
+    async addWarn({ guildId, userId, moderatorId, reason, durationDays = 0, expiresAt = null }) {
       const { rows } = await pool.query(
         `INSERT INTO user_warns (guild_id, user_id, moderator_id, reason, duration_days, expires_at)
-         VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+         VALUES ($1, $2, $3, $4, COALESCE($5, 0), COALESCE($6, '9999-12-31 23:59:59+00'::timestamptz)) RETURNING *`,
         [guildId, userId, moderatorId, reason, durationDays, expiresAt],
       );
       return rows[0];
@@ -430,7 +430,7 @@ export function createDb(connectionString) {
     async getActiveWarns(guildId, userId) {
       const { rows } = await pool.query(
         `SELECT * FROM user_warns
-         WHERE guild_id = $1 AND user_id = $2 AND active = true AND expires_at > now()
+         WHERE guild_id = $1 AND user_id = $2 AND active = true AND (expires_at IS NULL OR expires_at > now())
          ORDER BY id DESC`,
         [guildId, userId],
       );
@@ -469,7 +469,7 @@ export function createDb(connectionString) {
          SET active = false, unwarned_by = $3, unwarn_reason = $4, unwarned_at = now()
          WHERE id = (
            SELECT id FROM user_warns
-           WHERE guild_id = $1 AND user_id = $2 AND active = true AND expires_at > now()
+           WHERE guild_id = $1 AND user_id = $2 AND active = true AND (expires_at IS NULL OR expires_at > now())
            ORDER BY id DESC
            LIMIT 1
          )

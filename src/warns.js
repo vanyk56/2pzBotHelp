@@ -1,15 +1,15 @@
 import {
   ApplicationCommandOptionType,
+  ChannelType,
   EmbedBuilder,
   MessageFlags,
-  PermissionFlagsBits,
 } from 'discord.js';
 import { sendWarnLog } from './ticket-logs.js';
 
 export const WARN_COMMANDS = [
   {
     name: 'warn',
-    description: 'Выдать предупреждение (варн) игроку',
+    description: 'Выдать варн игроку (навсегда; при 3/3 — бан на сервере)',
     options: [
       {
         name: 'user',
@@ -22,12 +22,6 @@ export const WARN_COMMANDS = [
         description: 'Причина предупреждения',
         type: ApplicationCommandOptionType.String,
         required: true,
-      },
-      {
-        name: 'duration',
-        description: 'Срок действия в днях (например 7, 7d, 14, 30. По умолчанию: 7d)',
-        type: ApplicationCommandOptionType.String,
-        required: false,
       },
     ],
   },
@@ -69,14 +63,43 @@ export const WARN_COMMANDS = [
   },
 ];
 
-export function parseDurationDays(str) {
-  if (!str || typeof str !== 'string') return 7;
-  const match = str.trim().match(/^(\d+)/);
-  if (!match) return 7;
-  const num = parseInt(match[1], 10);
-  if (Number.isNaN(num) || num < 1) return 7;
-  if (num > 365) return 365;
-  return num;
+/**
+ * Ищет канал для оповещений о варнах (#🛑-varn, #varn, #варны)
+ */
+export async function getWarnChannel(guild, server) {
+  if (!guild) return null;
+  if (server?.warnChannelId) {
+    const ch = await guild.channels.fetch(server.warnChannelId).catch(() => null);
+    if (ch) return ch;
+  }
+  const channels = await guild.channels.fetch().catch(() => null);
+  if (!channels) return null;
+  return (
+    channels.find(
+      (c) =>
+        c &&
+        c.type === ChannelType.GuildText &&
+        /(varn|warn|варн)/i.test(c.name),
+    ) || null
+  );
+}
+
+/**
+ * Ищет роль варна на сервере (по ID из настроек или по названию «Варн» / «Warn»)
+ */
+export async function getWarnRole(guild, server) {
+  if (!guild) return null;
+  if (server?.warnRoleId) {
+    const role = await guild.roles.fetch(server.warnRoleId).catch(() => null);
+    if (role) return role;
+  }
+  const roles = await guild.roles.fetch().catch(() => null);
+  if (!roles) return null;
+  return (
+    roles.find(
+      (r) => r && /(^|\s)(варн|warn|предупреждение)(\s|$)/i.test(r.name),
+    ) || null
+  );
 }
 
 export function createWarnManager({ db, client, servers }) {
@@ -100,8 +123,6 @@ export function createWarnManager({ db, client, servers }) {
 
     const targetUser = interaction.options.getUser('user', true);
     const reason = interaction.options.getString('reason', true).trim();
-    const durationInput = interaction.options.getString('duration');
-    const durationDays = parseDurationDays(durationInput);
 
     if (targetUser.bot) {
       return replyEphemeral(interaction, 'Ботам нельзя выдавать варны.');
@@ -109,67 +130,61 @@ export function createWarnManager({ db, client, servers }) {
 
     await interaction.deferReply();
 
-    const expiresAt = new Date(Date.now() + durationDays * 24 * 60 * 60 * 1000);
-
+    // Варны бессрочные (навсегда)
     const warn = await db.addWarn({
       guildId: interaction.guildId,
       userId: targetUser.id,
       moderatorId: interaction.user.id,
       reason,
-      durationDays,
-      expiresAt,
+      durationDays: 0,
+      expiresAt: null,
     });
 
     const activeWarns = await db.getActiveWarns(interaction.guildId, targetUser.id);
     const activeCount = activeWarns.length;
 
-    let sanctionNote = null;
     let member = null;
     try {
       member = await interaction.guild.members.fetch(targetUser.id).catch(() => null);
     } catch {}
 
-    // Авто-санкция при 3/3 активных варнах
-    if (activeCount >= 3) {
-      const sanctionParts = [];
-      if (server.acceptedRoleId && member?.roles?.cache?.has(server.acceptedRoleId)) {
-        try {
-          await member.roles.remove(server.acceptedRoleId, '3/3 активных варнов');
-          sanctionParts.push(`роль клана <@&${server.acceptedRoleId}> снята`);
-        } catch (err) {
-          console.warn('Не удалось снять роль клана при 3/3 варнах:', err.message);
+    // Выдача роли варна (если на сервере есть роль «Варн» или настроена warnRoleId)
+    let roleAssignedText = null;
+    try {
+      const warnRole = await getWarnRole(interaction.guild, server);
+      if (warnRole && member) {
+        if (!member.roles.cache.has(warnRole.id)) {
+          await member.roles.add(warnRole.id, 'Выдан варн');
         }
+        roleAssignedText = `Выдана роль <@&${warnRole.id}>`;
       }
-
-      if (member) {
-        try {
-          // 7 дней таймаута
-          const timeoutMs = 7 * 24 * 60 * 60 * 1000;
-          await member.timeout(timeoutMs, '3/3 активных варнов');
-          sanctionParts.push('выдан таймаут на 7 дней');
-        } catch (err) {
-          console.warn('Не удалось выдать таймаут при 3/3 варнах:', err.message);
-        }
-      }
-
-      if (sanctionParts.length > 0) {
-        sanctionNote = `🚨 Достигнут лимит 3/3 варнов: ${sanctionParts.join(', ')}!`;
-      } else {
-        sanctionNote = '🚨 Достигнут лимит 3/3 варнов!';
-      }
+    } catch (err) {
+      console.warn('Не удалось выдать роль варна:', err.message);
     }
 
-    // Отправка в ЛС игроку
+    let sanctionNote = null;
+    const willBan = activeCount >= 3;
+
+    if (willBan) {
+      sanctionNote = '🚨 **Достигнут лимит 3/3 варнов: игроку выдан БАН на сервере!**';
+    }
+
+    // 1. Оповещение игроку в ЛС (отправляем ДО бана, пока есть общий сервер)
+    let dmDelivered = false;
     try {
       const dmEmbed = new EmbedBuilder()
         .setColor(activeCount >= 3 ? 0xed4245 : 0xfee75c)
         .setTitle(`⚠️ Вам выдан варн на сервере ${interaction.guild.name}`)
         .addFields(
           { name: '💬 Причина', value: reason, inline: false },
-          { name: '⏱️ Срок', value: `${durationDays} дн. (до <t:${Math.floor(expiresAt.getTime() / 1000)}:f>)`, inline: true },
+          { name: '⏳ Срок действия', value: 'Бессрочно (навсегда)', inline: true },
           { name: '📊 Активных варнов', value: `**${activeCount}/3**`, inline: true },
+          { name: '🛡️ Модератор', value: `<@${interaction.user.id}>`, inline: true },
         )
-        .setFooter({ text: 'При накоплении 3 варнов роль клана снимается. Вы можете обжаловать варн через тикет.' })
+        .setDescription(
+          '🚨 **ВНИМАНИЕ: При наличии 3 варнов вам выдаётся БАН на сервере!**\n\n' +
+            `📩 *Варны не сгорают по времени. За обжалованием варнов писать в тикет на сервере:* <#${server.panelChannelId}>`,
+        )
         .setTimestamp(new Date());
 
       if (sanctionNote) {
@@ -177,11 +192,57 @@ export function createWarnManager({ db, client, servers }) {
       }
 
       await targetUser.send({ embeds: [dmEmbed] });
+      dmDelivered = true;
     } catch {
-      // Игнорируем закрытые ЛС
+      dmDelivered = false;
     }
 
-    // Логирование в #тикет-логи
+    // 2. Исполнение бана при 3/3 варнах
+    if (willBan && member) {
+      try {
+        if (server.acceptedRoleId && member.roles.cache.has(server.acceptedRoleId)) {
+          await member.roles.remove(server.acceptedRoleId).catch(() => {});
+        }
+        if (member.bannable) {
+          await member.ban({
+            reason: `3/3 активных варнов (лимит). Последняя причина: ${reason}`,
+          });
+        } else {
+          await member.timeout(28 * 24 * 60 * 60 * 1000, '3/3 активных варнов');
+          sanctionNote = '🚨 Игрок набрал 3/3 варнов! (Выдан максимальный таймаут, так как у бота нет прав забанить из-за иерархии ролей)';
+        }
+      } catch (err) {
+        console.warn('Ошибка при бане игрока за 3 варна:', err.message);
+      }
+    }
+
+    // 3. Публичное оповещение на сервере в канал варнов (#🛑-varn / #varn)
+    const warnChannel = await getWarnChannel(interaction.guild, server);
+    const serverEmbed = new EmbedBuilder()
+      .setColor(activeCount >= 3 ? 0xed4245 : 0xfee75c)
+      .setTitle(`⚠️ Выдан варн #${warn.id}`)
+      .setDescription(
+        `Игроку <@${targetUser.id}> успешно выдан варн (**${activeCount}/3**).\n\n` +
+          `• **Причина:** ${reason}\n` +
+          `• **Срок:** Бессрочно (навсегда)\n` +
+          `• **Модератор:** <@${interaction.user.id}>\n` +
+          (roleAssignedText ? `• **Роль:** ${roleAssignedText}\n` : '') +
+          `\n🚨 **ВНИМАНИЕ: При наличии 3 варнов выдаётся БАН на сервере!**\n` +
+          `📩 *Варны не имеют срока. За обжалованием варнов писать в тикет:* <#${server.panelChannelId}>\n` +
+          (sanctionNote ? `\n${sanctionNote}` : ''),
+      )
+      .setTimestamp(new Date());
+
+    if (warnChannel && warnChannel.id !== interaction.channelId) {
+      await warnChannel
+        .send({
+          content: `<@${targetUser.id}>, вам выдан варн!`,
+          embeds: [serverEmbed],
+        })
+        .catch((err) => console.warn('Не удалось отправить сообщение в канал варнов:', err.message));
+    }
+
+    // 4. Логирование в #тикет-логи для администрации
     await sendWarnLog({
       guild: interaction.guild,
       server,
@@ -194,18 +255,10 @@ export function createWarnManager({ db, client, servers }) {
       sanctionNote,
     });
 
-    const replyEmbed = new EmbedBuilder()
-      .setColor(activeCount >= 3 ? 0xed4245 : 0xfee75c)
-      .setTitle(`⚠️ Выдан варн #${warn.id}`)
-      .setDescription(
-        `Игроку <@${targetUser.id}> успешно выдан варн (**${activeCount}/3**).\n\n` +
-          `• **Причина:** ${reason}\n` +
-          `• **Срок:** ${durationDays} дн. (до <t:${Math.floor(expiresAt.getTime() / 1000)}:f>)\n` +
-          `• **Модератор:** <@${interaction.user.id}>` +
-          (sanctionNote ? `\n\n${sanctionNote}` : ''),
-      );
+    const dmStatusText = dmDelivered ? '✅ Оповещение отправлено в ЛС' : '⚠️ ЛС закрыты (оповещён на сервере)';
+    serverEmbed.setFooter({ text: `${dmStatusText} · Варн бессрочный` });
 
-    return interaction.editReply({ embeds: [replyEmbed] });
+    return interaction.editReply({ embeds: [serverEmbed] });
   }
 
   async function handleUnwarn(interaction, server) {
@@ -252,6 +305,21 @@ export function createWarnManager({ db, client, servers }) {
     const remainingActive = await db.getActiveWarns(interaction.guildId, targetUserId);
     const activeCount = remainingActive.length;
 
+    // Снятие роли варна, если активных варнов больше нет
+    let roleRemovedText = null;
+    if (activeCount === 0) {
+      try {
+        const warnRole = await getWarnRole(interaction.guild, server);
+        const member = await interaction.guild.members.fetch(targetUserId).catch(() => null);
+        if (warnRole && member && member.roles.cache.has(warnRole.id)) {
+          await member.roles.remove(warnRole.id, 'Сняты все варны');
+          roleRemovedText = `Роль <@&${warnRole.id}> снята`;
+        }
+      } catch (err) {
+        console.warn('Не удалось снять роль варна:', err.message);
+      }
+    }
+
     // Оповещение в ЛС
     try {
       const userObj = await client.users.fetch(targetUserId).catch(() => null);
@@ -259,11 +327,39 @@ export function createWarnManager({ db, client, servers }) {
         const dmEmbed = new EmbedBuilder()
           .setColor(0x57f287)
           .setTitle(`✅ С вас снят варн на сервере ${interaction.guild.name}`)
-          .setDescription(`Варн #${removedWarn.id} был досрочно снят.\n**Причина снятия:** ${reason}\n**Осталось активных варнов:** ${activeCount}/3`)
+          .setDescription(
+            `Варн #${removedWarn.id} был досрочно снят модератором <@${interaction.user.id}>.\n\n` +
+              `• **Причина снятия:** ${reason}\n` +
+              `• **Осталось активных варнов:** **${activeCount}/3**` +
+              (roleRemovedText ? `\n• **Роль:** ${roleRemovedText}` : ''),
+          )
           .setTimestamp(new Date());
         await userObj.send({ embeds: [dmEmbed] });
       }
     } catch {}
+
+    // Оповещение в канал варнов (#varn)
+    const warnChannel = await getWarnChannel(interaction.guild, server);
+    const unwarnEmbed = new EmbedBuilder()
+      .setColor(0x57f287)
+      .setTitle(`✅ Снят варн #${removedWarn.id}`)
+      .setDescription(
+        `С игрока <@${targetUserId}> успешно снят варн #${removedWarn.id}.\n\n` +
+          `• **Причина снятия:** ${reason}\n` +
+          `• **Осталось активных варнов:** **${activeCount}/3**\n` +
+          `• **Модератор:** <@${interaction.user.id}>` +
+          (roleRemovedText ? `\n• **Роль:** ${roleRemovedText}` : ''),
+      )
+      .setTimestamp(new Date());
+
+    if (warnChannel && warnChannel.id !== interaction.channelId) {
+      await warnChannel
+        .send({
+          content: `<@${targetUserId}>, ваш варн был снят!`,
+          embeds: [unwarnEmbed],
+        })
+        .catch(() => {});
+    }
 
     // Лог
     await sendWarnLog({
@@ -277,17 +373,7 @@ export function createWarnManager({ db, client, servers }) {
       activeCount,
     });
 
-    const replyEmbed = new EmbedBuilder()
-      .setColor(0x57f287)
-      .setTitle(`✅ Снят варн #${removedWarn.id}`)
-      .setDescription(
-        `С игрока <@${targetUserId}> успешно снят варн #${removedWarn.id}.\n` +
-          `• **Причина снятия:** ${reason}\n` +
-          `• **Осталось активных варнов:** **${activeCount}/3**\n` +
-          `• **Модератор:** <@${interaction.user.id}>`,
-      );
-
-    return interaction.editReply({ embeds: [replyEmbed] });
+    return interaction.editReply({ embeds: [unwarnEmbed] });
   }
 
   async function handleWarns(interaction, server) {
@@ -299,40 +385,34 @@ export function createWarnManager({ db, client, servers }) {
     await interaction.deferReply();
 
     const allWarns = await db.getAllWarns(interaction.guildId, targetUser.id);
-    const activeWarns = allWarns.filter(
-      (w) => w.active && new Date(w.expires_at).getTime() > Date.now(),
-    );
+    const activeWarns = allWarns.filter((w) => w.active);
 
     const embed = new EmbedBuilder()
       .setColor(activeWarns.length >= 3 ? 0xed4245 : activeWarns.length > 0 ? 0xfee75c : 0x57f287)
-      .setTitle(`📋 История предупреждений: ${targetUser.tag}`)
+      .setTitle(`📋 История предупреждений: ${targetUser.username}`)
       .setThumbnail(targetUser.displayAvatarURL())
       .setDescription(
         `👤 Игрок: <@${targetUser.id}>\n` +
           `⚠️ Активных варнов: **${activeWarns.length}/3**\n` +
           `📜 Всего получено: **${allWarns.length}**\n\n` +
+          `🚨 **При наличии 3 варнов выдаётся БАН на сервере!**\n` +
+          `📩 *Варны не сгорают по времени. За обжалованием варнов писать в тикет:* <#${server.panelChannelId}>\n\n` +
           (allWarns.length === 0
             ? '✅ У игрока нет предупреждений.'
             : allWarns
                 .slice(0, 10)
                 .map((w) => {
-                  const isActive = w.active && new Date(w.expires_at).getTime() > Date.now();
-                  const status = isActive
-                    ? '🔴 **Активен**'
-                    : w.unwarned_at
-                      ? '🟢 **Снят**'
-                      : '⚪ *Истёк*';
-                  const expUnix = Math.floor(new Date(w.expires_at).getTime() / 1000);
+                  const status = w.active ? '🔴 **Активен**' : '🟢 **Снят**';
                   const createdUnix = Math.floor(new Date(w.created_at).getTime() / 1000);
                   return (
                     `**#${w.id}** [${status}] — *«${w.reason}»*\n` +
-                    `└ Выдан: <t:${createdUnix}:d> (<@${w.moderator_id}>) · Истекает: <t:${expUnix}:R>` +
+                    `└ Выдан: <t:${createdUnix}:d> (<@${w.moderator_id}>) · Срок: бессрочно` +
                     (w.unwarn_reason ? ` · Снял: <@${w.unwarned_by}> (*${w.unwarn_reason}*)` : '')
                   );
                 })
                 .join('\n\n')),
       )
-      .setFooter({ text: 'Максимум 3 активных варна перед снятием роли' })
+      .setFooter({ text: 'Лимит: 3 активных варна = бан' })
       .setTimestamp(new Date());
 
     return interaction.editReply({ embeds: [embed] });

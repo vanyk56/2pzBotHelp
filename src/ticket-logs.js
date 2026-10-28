@@ -310,9 +310,17 @@ export function buildWarnLogEmbed({
     )
     .setTimestamp(new Date());
 
-  if (warn.expires_at && isWarn) {
-    const unix = Math.floor(new Date(warn.expires_at).getTime() / 1000);
-    embed.addFields({ name: '⏳ Срок действия', value: `<t:${unix}:f> (<t:${unix}:R>)`, inline: true });
+  if (isWarn) {
+    const isPermanent = !warn.expires_at || new Date(warn.expires_at).getFullYear() > 2100;
+    const expiresText = isPermanent
+      ? 'Бессрочно (навсегда)'
+      : `<t:${Math.floor(new Date(warn.expires_at).getTime() / 1000)}:f>`;
+    embed.addFields({ name: '⏳ Срок действия', value: expiresText, inline: true });
+    embed.addFields({
+      name: '🚨 Правило',
+      value: 'При наличии 3 варнов выдаётся БАН на сервере. Обжалование только через тикет.',
+      inline: false,
+    });
   }
 
   if (sanctionNote) {
