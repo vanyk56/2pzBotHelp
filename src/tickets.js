@@ -12,6 +12,7 @@ import {
   TextInputBuilder,
   TextInputStyle,
 } from 'discord.js';
+import { readFileSync } from 'node:fs';
 import {
   buildFormModal,
   findType,
@@ -38,6 +39,31 @@ import {
 import { sendTicketLog } from './ticket-logs.js';
 import { buildSteamCheckEmbed, checkSteamAccount } from './steam.js';
 import { buildTranscriptAttachment } from './transcript.js';
+
+// Загружает 3D эмодзи из assets/emoji на сервер, если их там ещё нет
+export async function ensureTicketEmojis(guild) {
+  if (!guild?.emojis) return;
+  await guild.emojis.fetch().catch(() => {});
+  const list = [
+    { name: '2pz_caller', file: '2pz_caller.png' },
+    { name: '2pz_media', file: '2pz_media.png' },
+    { name: '2pz_mod', file: '2pz_mod.png' },
+    { name: '2pz_warn', file: '2pz_warn.png' },
+    { name: '2pz_report', file: '2pz_report.png' },
+    { name: '2pz_clan', file: '2pz_clan.png' },
+    { name: '2pz_idea', file: '2pz_idea.png' },
+  ];
+  for (const item of list) {
+    if (guild.emojis.cache.some((e) => e.name === item.name)) continue;
+    try {
+      const attachment = readFileSync(new URL(`../assets/emoji/${item.file}`, import.meta.url));
+      await guild.emojis.create({ name: item.name, attachment });
+      console.log(`Загружен кастомный 3D эмодзи :${item.name}: на сервер «${guild.name}»`);
+    } catch (err) {
+      console.warn(`Не удалось загрузить эмодзи ${item.name} на «${guild.name}»:`, err.message);
+    }
+  }
+}
 
 // Кнопка открытия формы: ticket:open:<id типа>. Старый ticket:open означает клан (панели, опубликованные до перехода)
 const OPEN_PREFIX = 'ticket:open:';
@@ -219,7 +245,8 @@ export function createTicketBot({ client, db, ai, servers, contextMessages, stea
   }
 
   // Панель сервера: выпадающий список (Select Menu) или кнопка
-  function panelPayload(server) {
+  function panelPayload(server, guild = null) {
+    const targetGuild = guild || client.guilds.cache.get(server.guildId);
     const panel = ticketConfig.panels[server.panelKey];
     const embed = new EmbedBuilder().setColor(0x5865f2).setTitle(panel.title).setDescription(panel.description);
 
@@ -236,7 +263,13 @@ export function createTicketBot({ client, db, ai, servers, contextMessages, stea
               value: type.id,
               description: type.description || type.title || 'Подать заявку',
             };
-            if (type.emoji) opt.emoji = type.emoji;
+            const customEmojiName = type.customEmoji || `2pz_${type.id}`;
+            const customEmoji = targetGuild?.emojis?.cache?.find((e) => e.name === customEmojiName);
+            if (customEmoji) {
+              opt.emoji = { id: customEmoji.id, name: customEmoji.name };
+            } else if (type.emoji) {
+              opt.emoji = type.emoji;
+            }
             return opt;
           }),
         );
@@ -253,7 +286,14 @@ export function createTicketBot({ client, db, ai, servers, contextMessages, stea
       .setCustomId(`${OPEN_PREFIX}${type.id}`)
       .setLabel(type.button)
       .setStyle(ButtonStyle.Primary);
-    if (type.emoji) button.setEmoji(type.emoji);
+
+    const customEmojiName = type.customEmoji || `2pz_${type.id}`;
+    const customEmoji = targetGuild?.emojis?.cache?.find((e) => e.name === customEmojiName);
+    if (customEmoji) {
+      button.setEmoji(customEmoji.id);
+    } else if (type.emoji) {
+      button.setEmoji(type.emoji);
+    }
 
     return { embeds: [embed], components: [new ActionRowBuilder().addComponents(button)] };
   }
@@ -276,7 +316,7 @@ export function createTicketBot({ client, db, ai, servers, contextMessages, stea
       if (isOldPanel) await message.delete().catch(() => {});
     }
 
-    const panel = await channel.send(panelPayload(server));
+    const panel = await channel.send(panelPayload(server, channel.guild));
     await panel.pin();
     return channel;
   }

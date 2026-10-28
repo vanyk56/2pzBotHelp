@@ -2,7 +2,7 @@ import { Client, Events, GatewayIntentBits, MessageFlags } from 'discord.js';
 import { config } from './config.js';
 import { createDb } from './db.js';
 import { createAiClient } from './ai.js';
-import { createTicketBot } from './tickets.js';
+import { createTicketBot, ensureTicketEmojis } from './tickets.js';
 import { createEventBot, ensureEventEmojis, EVENT_COMMAND } from './events.js';
 import { RULES_COMMAND } from './rules-card.js';
 import { PROFILES_COMMAND } from './profiles.js';
@@ -65,6 +65,7 @@ client.once(Events.ClientReady, async (readyClient) => {
     try {
       const guild = await readyClient.guilds.fetch(server.guildId);
       await guild.commands.set(server.events ? [...COMMANDS, EVENT_COMMAND] : COMMANDS);
+      await ensureTicketEmojis(guild).catch((error) => console.error(`Не удалось загрузить 3D эмодзи на «${server.name}»:`, error.message));
       if (server.events) {
         await ensureEventEmojis(guild).catch((error) => console.error('Не удалось загрузить эмодзи сбора:', error.message));
       }

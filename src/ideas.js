@@ -74,7 +74,7 @@ export const IDEA_VOTE_PREFIX = 'idea:vote:';
 export const IDEA_DECIDE_PREFIX = 'idea:decide:';
 export const IDEA_DECIDE_MODAL_PREFIX = 'idea:modal_decide:';
 
-export function buildIdeasPanelPayload() {
+export function buildIdeasPanelPayload(guild = null) {
   const embed = new EmbedBuilder()
     .setColor(0x5865f2)
     .setTitle('💡 Идеи и предложения')
@@ -82,11 +82,18 @@ export function buildIdeasPanelPayload() {
       'Предложите изменение или новую возможность для развития клана. После публикации участники смогут проголосовать.',
     );
 
+  const customEmoji = guild?.emojis?.cache?.find((e) => e.name === '2pz_idea');
+
   const button = new ButtonBuilder()
     .setCustomId(IDEA_OPEN_MODAL_ID)
     .setLabel('Предложить идею')
-    .setEmoji('💡')
     .setStyle(ButtonStyle.Primary);
+
+  if (customEmoji) {
+    button.setEmoji(customEmoji.id);
+  } else {
+    button.setEmoji('💡');
+  }
 
   return {
     embeds: [embed],
@@ -393,7 +400,7 @@ export function createIdeasManager({ db, client, servers }) {
 
     if (sub === 'panel') {
       const channel = interaction.channel;
-      await channel.send(buildIdeasPanelPayload());
+      await channel.send(buildIdeasPanelPayload(interaction.guild));
       return replyEphemeral(interaction, 'Панель «Идеи и предложения» успешно опубликована!');
     }
 
