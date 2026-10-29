@@ -331,11 +331,9 @@ export function createEventBot({ db, servers, client }) {
       roleId: role?.id ?? interaction.guildId,
     });
 
-    // Квадрат карты интегрирован прямо в баннер, поэтому отдельный файл не нужен,
-    // чтобы Discord не создавал уродливый сплит-коллаж двух картинок вверху сообщения.
-    // Если баннер не нарисовался, gridImage используется как запасной thumbnail.
+    // Картинки не ломают сбор: если что-то не нарисовалось, публикуем без неё
     const banner = await renderImage(() => renderBanner(data), 'баннер сбора');
-    const gridImage = !banner && grid ? await renderImage(() => renderGrid(grid), 'квадрат карты') : null;
+    const gridImage = grid ? await renderImage(() => renderGrid(grid), 'квадрат карты') : null;
 
     await interaction.deferReply();
     const { view } = await buildView(event, interaction.guild, {
