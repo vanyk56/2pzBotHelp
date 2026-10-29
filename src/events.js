@@ -110,13 +110,19 @@ export function renderEvent(event, stats, { bannerName = null, gridName = null, 
   const { id, data } = event;
   const pendingLabel = stats.pending === null ? 'Проверка' : `Не ответили · ${stats.pending}`;
 
+  const copyLines = [
+    `**Сервер:** ${data.title}`,
+    `**Дата и время:** ${data.date} ${data.time} МСК`,
+  ];
+  if (data.grid) copyLines.push(`**Квадрат:** ${data.grid}`);
+
   const embed = new EmbedBuilder()
     .setColor(0x2b2d31)
     .setDescription(startLine(data.startsUnix))
     .addFields(
       {
         name: '📋 Данные для копирования',
-        value: `**Сервер:** ${data.title}\n**Дата и время:** ${data.date} ${data.time} МСК`,
+        value: copyLines.join('\n'),
       },
       { name: 'Подключение', value: codeBlock(data.connect) },
     );
@@ -325,9 +331,11 @@ export function createEventBot({ db, servers, client }) {
       roleId: role?.id ?? interaction.guildId,
     });
 
-    // Картинки не ломают сбор: если что-то не нарисовалось, публикуем без неё
+    // Квадрат карты интегрирован прямо в баннер, поэтому отдельный файл не нужен,
+    // чтобы Discord не создавал уродливый сплит-коллаж двух картинок вверху сообщения.
+    // Если баннер не нарисовался, gridImage используется как запасной thumbnail.
     const banner = await renderImage(() => renderBanner(data), 'баннер сбора');
-    const gridImage = grid ? await renderImage(() => renderGrid(grid), 'квадрат карты') : null;
+    const gridImage = !banner && grid ? await renderImage(() => renderGrid(grid), 'квадрат карты') : null;
 
     await interaction.deferReply();
     const { view } = await buildView(event, interaction.guild, {

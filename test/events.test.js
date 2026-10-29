@@ -146,3 +146,18 @@ test('баннер и квадрат карты рендерятся в PNG', as
     assert.ok(png.length > 5_000);
   }
 });
+
+test('баннер с длинным названием и сеткой рендерится без ошибок', async () => {
+  const longEvent = {
+    title: 'КЛАССИКА х2 | GGRust #1 | Для новичков 2х',
+    date: '30.10.2026',
+    time: '16:00',
+    weekday: 'пятница',
+    connect: 'connect 80.242.59.104:35000',
+    startsUnix: 1793365200,
+    grid: 'T6',
+  };
+  const png = await renderBanner(longEvent);
+  assert.equal(png.subarray(0, 4).toString('hex'), '89504e47');
+  assert.ok(png.length > 10_000);
+});

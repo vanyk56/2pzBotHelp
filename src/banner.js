@@ -3,14 +3,10 @@ import satori from 'satori';
 import { Resvg } from '@resvg/resvg-js';
 
 const WIDTH = 1000;
-const HEIGHT = 542;
-// satori считает padding сверх width: внутренний блок 912 + 2 × 44 = 1000
-const INNER_WIDTH = 912;
-const INNER_HEIGHT = 454;
-const PAD = 44;
-// Ширина карточки внутри внутреннего блока: 912 = 2 × (card + 52) + 20
-const CARD = 394;
-const FULL = INNER_WIDTH - 52;
+const HEIGHT = 540;
+const PAD_X = 44;
+const PAD_Y = 32;
+const INNER_WIDTH = WIDTH - PAD_X * 2; // 912
 
 const SANS = 'DejaVu Sans';
 const MONO = 'DejaVu Sans Mono';
@@ -43,8 +39,8 @@ const card = (style, children) =>
   box(
     {
       flexDirection: 'column',
-      padding: '20px 26px',
-      borderRadius: 18,
+      padding: '14px 20px',
+      borderRadius: 16,
       background: 'rgba(255,255,255,0.06)',
       border: '1px solid rgba(255,255,255,0.10)',
       ...style,
@@ -52,7 +48,7 @@ const card = (style, children) =>
     children,
   );
 
-const label = (text) => box({ fontSize: 18, fontWeight: 700, letterSpacing: 2, color: '#a9a3cf' }, [text]);
+const label = (text) => box({ fontSize: 13, fontWeight: 700, letterSpacing: 2, color: '#a9a3cf' }, [text]);
 
 // «12 декабря 2026» без «г.», как в образце
 function dateLongMoscow(startsUnix) {
@@ -66,8 +62,44 @@ function dateLongMoscow(startsUnix) {
     .replace(/\s*г\.?$/, '');
 }
 
-// Баннер сбора: название, дата, время и подключение. Возвращает PNG
+// Баннер сбора: название, дата, время, подключение и (опционально) клетка карты. Возвращает PNG
 export async function renderBanner(data) {
+  const hasGrid = Boolean(data.grid);
+  const titleLen = (data.title || '').length;
+  const titleSize = titleLen > 35 ? 36 : titleLen > 22 ? 44 : 54;
+
+  const middleRow = hasGrid
+    ? [
+        card({ flex: 1 }, [
+          label('ДАТА ВАЙПА'),
+          box({ fontSize: 24, fontWeight: 700, marginTop: 4 }, [dateLongMoscow(data.startsUnix)]),
+          box({ fontSize: 15, color: '#8fd2ff', marginTop: 2 }, [data.weekday]),
+        ]),
+        box({ width: 14 }),
+        card({ flex: 1 }, [
+          label('НАЧАЛО (МСК)'),
+          box({ fontSize: 40, fontWeight: 700, marginTop: 2 }, [data.time]),
+        ]),
+        box({ width: 14 }),
+        card({ flex: 1, background: 'rgba(59, 163, 255, 0.12)', border: '1px solid rgba(59, 163, 255, 0.35)' }, [
+          label('КВАДРАТ КАРТЫ'),
+          box({ fontSize: 40, fontWeight: 700, color: '#ffffff', marginTop: 2 }, [data.grid]),
+          box({ fontSize: 12, color: '#8fd2ff', marginTop: 2 }, ['ЗОНА СТРОЙКИ']),
+        ]),
+      ]
+    : [
+        card({ flex: 1 }, [
+          label('ДАТА ВАЙПА'),
+          box({ fontSize: 28, fontWeight: 700, marginTop: 4 }, [dateLongMoscow(data.startsUnix)]),
+          box({ fontSize: 16, color: '#8fd2ff', marginTop: 2 }, [data.weekday]),
+        ]),
+        box({ width: 20 }),
+        card({ flex: 1 }, [
+          label('НАЧАЛО (МСК)'),
+          box({ fontSize: 46, fontWeight: 700, marginTop: 2 }, [data.time]),
+        ]),
+      ];
+
   const tree = box(
     {
       width: WIDTH,
@@ -75,39 +107,23 @@ export async function renderBanner(data) {
       background: BACKGROUND,
       color: '#ffffff',
       fontFamily: SANS,
+      padding: `${PAD_Y}px ${PAD_X}px`,
+      flexDirection: 'column',
     },
     [
-      box(
-        {
-          flexDirection: 'column',
-          width: INNER_WIDTH,
-          height: INNER_HEIGHT,
-          padding: PAD,
-        },
-        [
-          box({ justifyContent: 'space-between', alignItems: 'center' }, [
-            box({ background: ACCENT, borderRadius: 999, padding: '10px 26px', fontSize: 24, fontWeight: 700 }, ['ВАЙП']),
-            box({ fontSize: 20, color: '#b9b3d6' }, ['Время указано по МСК']),
-          ]),
-          box({ flexDirection: 'column', marginTop: 24 }, [
-            box({ fontSize: 68, fontWeight: 700, lineHeight: 1.1 }, [data.title]),
-            box({ width: 180, height: 4, background: ACCENT, borderRadius: 2, marginTop: 12 }),
-          ]),
-          box({ marginTop: 30 }, [
-            card({ width: CARD }, [
-              label('ДАТА ВАЙПА'),
-              box({ fontSize: 34, fontWeight: 700, marginTop: 8 }, [dateLongMoscow(data.startsUnix)]),
-              box({ fontSize: 20, color: '#8fd2ff', marginTop: 4 }, [data.weekday]),
-            ]),
-            box({ width: 20 }),
-            card({ width: CARD }, [label('НАЧАЛО (МСК)'), box({ fontSize: 58, fontWeight: 700, marginTop: 2 }, [data.time])]),
-          ]),
-          card({ width: FULL, marginTop: 20 }, [
-            label('ПОДКЛЮЧЕНИЕ'),
-            box({ fontFamily: MONO, fontSize: 32, fontWeight: 700, marginTop: 6 }, [data.connect]),
-          ]),
-        ],
-      ),
+      box({ width: INNER_WIDTH, justifyContent: 'space-between', alignItems: 'center' }, [
+        box({ background: ACCENT, borderRadius: 999, padding: '6px 20px', fontSize: 18, fontWeight: 700 }, ['ВАЙП']),
+        box({ fontSize: 16, color: '#b9b3d6' }, ['Время указано по МСК']),
+      ]),
+      box({ width: INNER_WIDTH, flexDirection: 'column', marginTop: 14 }, [
+        box({ fontSize: titleSize, fontWeight: 700, lineHeight: 1.15 }, [data.title]),
+        box({ width: 140, height: 4, background: ACCENT, borderRadius: 2, marginTop: 8 }),
+      ]),
+      box({ width: INNER_WIDTH, alignItems: 'stretch', marginTop: 16 }, middleRow),
+      card({ width: INNER_WIDTH, marginTop: 14, padding: '14px 20px' }, [
+        label('ПОДКЛЮЧЕНИЕ'),
+        box({ fontFamily: MONO, fontSize: 24, fontWeight: 700, marginTop: 4, color: '#ffffff' }, [data.connect]),
+      ]),
     ],
   );
 
