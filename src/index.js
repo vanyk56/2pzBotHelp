@@ -1,4 +1,4 @@
-import { Client, Events, GatewayIntentBits, MessageFlags } from 'discord.js';
+import { Client, Events, GatewayIntentBits, MessageFlags, Options } from 'discord.js';
 import { config } from './config.js';
 import { createDb } from './db.js';
 import { createAiClient } from './ai.js';
@@ -28,6 +28,15 @@ const db = createDb(config.database.url);
 const ai = createAiClient({ ...config.ai });
 const client = new Client({
   intents: [GatewayIntentBits.Guilds, GatewayIntentBits.GuildMessages, GatewayIntentBits.MessageContent],
+  // Бот читает сообщения только в момент события и историю запрашивает сам — длинный кэш не нужен
+  makeCache: Options.cacheWithLimits({
+    ...Options.DefaultMakeCacheSettings,
+    MessageManager: 50,
+    ReactionManager: 0,
+    GuildMemberManager: 200,
+    PresenceManager: 0,
+    VoiceStateManager: 0,
+  }),
 });
 
 const bot = createTicketBot({
@@ -61,7 +70,7 @@ client.once(Events.ClientReady, async (readyClient) => {
   await db.init();
 
   // Команды регистрируем на каждом сервере из servers.json
-  for (const server of config.discord.servers) {
+  await Promise.all(config.discord.servers.map(async (server) => {
     try {
       const guild = await readyClient.guilds.fetch(server.guildId);
       await guild.commands.set(server.events ? [...COMMANDS, EVENT_COMMAND] : COMMANDS);
@@ -73,7 +82,7 @@ client.once(Events.ClientReady, async (readyClient) => {
     } catch (error) {
       console.error(`Не удалось зарегистрировать команды на сервере «${server.name}»:`, error.message);
     }
-  }
+  }));
 
   // Строка «через N часов» в сборах обновляется раз в час
   const refresh = () => events.refreshActive().catch((error) => console.error('Ошибка обновления сборов:', error));
@@ -87,9 +96,8 @@ client.once(Events.ClientReady, async (readyClient) => {
   serverStats.start();
 
   // Очистка зависших тикетов, каналы которых были удалены в Discord
-  await bot.cleanupOrphanTickets();
-  // Восстановление прав пользователей на отправку сообщений в открытых тикетах
-  await bot.ensureOpenTicketPermissions();
+  // и восстановление прав авторов в открытых тикетах — независимые проверки, идут параллельно
+  await Promise.all([bot.cleanupOrphanTickets(), bot.ensureOpenTicketPermissions()]);
 
   console.log(`Бот ${readyClient.user.tag} запущен`);
 });

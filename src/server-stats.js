@@ -83,7 +83,7 @@ export function createServerStats({ client, db, servers, intervalMs = 10 * 60 * 
       : null;
 
     // Если в БД не было, пробуем найти среди существующих каналов
-    const allChannels = await guild.channels.fetch().catch(() => null);
+    const allChannels = category && totalChannel && onlineChannel ? null : await guild.channels.fetch().catch(() => null);
     if (allChannels) {
       if (!category) {
         category = allChannels.find(
@@ -202,18 +202,18 @@ export function createServerStats({ client, db, servers, intervalMs = 10 * 60 * 
   }
 
   async function updateAll() {
-    for (const server of servers) {
-      if (server.stats === true || server.guildId === '1424464968438382767') {
-        try {
-          const guild = await client.guilds.fetch(server.guildId).catch(() => null);
-          if (guild) {
-            await syncGuildStats(guild);
+    await Promise.all(
+      servers
+        .filter((server) => server.stats === true || server.guildId === '1424464968438382767')
+        .map(async (server) => {
+          try {
+            const guild = await client.guilds.fetch(server.guildId).catch(() => null);
+            if (guild) await syncGuildStats(guild);
+          } catch (err) {
+            console.error(`Ошибка обновления статистики для ${server.name}:`, err.message);
           }
-        } catch (err) {
-          console.error(`Ошибка обновления статистики для ${server.name}:`, err.message);
-        }
-      }
-    }
+        }),
+    );
   }
 
   async function handleInteraction(interaction) {

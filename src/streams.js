@@ -10,6 +10,7 @@ import {
 
 const GQL_URL = 'https://gql.twitch.tv/gql';
 const GQL_CLIENT_ID = 'kimne78kx3ncx6brgo4mv6wki5h1ko';
+const STREAM_CHECK_CONCURRENCY = 5;
 const TWITCH_COLOR = 0x7c6cff; // Фирменный стиль 2pz
 
 export function extractTwitchLogin(input) {
@@ -291,9 +292,12 @@ export function createStreamAlerts({ client, db, servers, pollIntervalMs = 60_00
       }
     }
 
-    for (const streamer of allStreamers) {
-      await checkStreamer(streamer);
-    }
+    // Опрашиваем стримеров пачками: Twitch отвечает быстро, а последовательный обход растягивается на минуты
+    const queue = [...allStreamers];
+    const workers = Array.from({ length: Math.min(STREAM_CHECK_CONCURRENCY, queue.length) }, async () => {
+      while (queue.length > 0) await checkStreamer(queue.shift());
+    });
+    await Promise.all(workers);
   }
 
   async function handleInteraction(interaction) {
